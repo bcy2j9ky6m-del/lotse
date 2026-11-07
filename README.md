@@ -15,6 +15,7 @@ Neue Versionen werden nach jeder Änderung automatisch gebaut (Reiter *Actions*,
 
 - Schritt 1: Ruhebildschirm mit Wochentag, Datum, Uhrzeit, Tageszeit und großer Sprechtaste ✔
 - Schritt 2: Zuhören (Spracherkennung Deutsch) und Nachsprechen (Sprachausgabe) ✔
+- Schritt 3: Antworten über den Lotse-Server (`server/worker.js`, Cloudflare Worker, zum Testen mit Gemini); Uhrzeit und Datum beantwortet Lotse auch ohne Internet
 
 ## Hinweis
 

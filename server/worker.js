@@ -1,0 +1,110 @@
+// Lotse-Server (Cloudflare Worker)
+// Nimmt den erkannten Satz von der Lotse-App entgegen, fragt das Sprachmodell
+// und schickt eine kurze, vorlesbare Antwort zurück.
+//
+// Benötigte Geheimnisse (Cloudflare → Worker → Settings → Variables and Secrets):
+//   GEMINI_KEY  – API-Schlüssel aus Google AI Studio
+//   LOTSE_TOKEN – Passwort, das nur die Lotse-App kennt
+// Optional (normale Variable):
+//   MODELL      – z. B. "gemini-flash-lite-latest" (Standard) oder "gemini-flash-latest"
+
+const ANWEISUNG = `Du bist „Lotse“, die Stimme eines einfachen Sprach-Handys für eine ältere Dame in Bremen.
+Alles, was du schreibst, wird laut vorgelesen.
+
+So antwortest du:
+- Auf Deutsch, freundlich, ruhig und geduldig. Du duzt sie.
+- Höchstens zwei kurze Sätze. Das Wichtigste zuerst.
+- Keine Listen, keine Aufzählungszeichen, keine Sternchen, keine Emojis, keine Abkürzungen.
+- Zahlen und Uhrzeiten so, wie man sie spricht: „um 14 Uhr“, „am Dienstag, dem 10. November“.
+- Wenn sie dasselbe mehrmals fragt, antwortest du jedes Mal wieder freundlich und vollständig.
+- Wenn du etwas nicht sicher weißt, sag das ehrlich.
+
+Grenzen:
+- Anrufen, Nachrichten schicken und Termine eintragen kannst du noch nicht. Sag dann freundlich:
+  „Das kann ich bald. Im Moment kann ich nur Fragen beantworten.“
+- Bei Fragen zu Gesundheit oder Medikamenten gibst du keine Ratschläge zur Dosis,
+  sondern empfiehlst, die Pflegekräfte oder den Arzt zu fragen.
+- Wenn jemand nach Geld, PIN, Passwörtern oder Kontodaten fragt oder es nach Betrug klingt,
+  warnst du deutlich und rätst, mit Bafti zu sprechen.`;
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Einfache Prüfseite: im Browser aufrufen → "Lotse-Server läuft"
+    if (request.method === "GET") {
+      return text("Lotse-Server läuft.");
+    }
+
+    if (request.method !== "POST" || url.pathname !== "/frage") {
+      return json({ fehler: "unbekannt" }, 404);
+    }
+
+    if (!env.LOTSE_TOKEN || request.headers.get("X-Lotse-Token") !== env.LOTSE_TOKEN) {
+      return json({ fehler: "nicht erlaubt" }, 401);
+    }
+
+    let eingabe;
+    try {
+      eingabe = await request.json();
+    } catch {
+      return json({ fehler: "ungültige Anfrage" }, 400);
+    }
+
+    const satz = String(eingabe.text || "").slice(0, 500);
+    const jetzt = String(eingabe.jetzt || "").slice(0, 100);
+    if (!satz) return json({ antwort: "Ich habe nichts gehört." });
+
+    const modell = env.MODELL || "gemini-flash-lite-latest";
+    const anfrage = {
+      systemInstruction: {
+        parts: [{ text: `${ANWEISUNG}\n\nJetzt ist: ${jetzt}.` }],
+      },
+      contents: [{ role: "user", parts: [{ text: satz }] }],
+      generationConfig: { maxOutputTokens: 200, temperature: 0.4 },
+    };
+
+    try {
+      const antwort = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": env.GEMINI_KEY,
+          },
+          body: JSON.stringify(anfrage),
+        }
+      );
+
+      if (antwort.status === 429) {
+        return json({ antwort: "Ich brauche eine kleine Pause. Frag mich bitte gleich nochmal." });
+      }
+      if (!antwort.ok) {
+        const details = await antwort.text();
+        return json({ antwort: "Da hat etwas nicht geklappt. Frag mich bitte gleich nochmal.", fehler: details.slice(0, 300) });
+      }
+
+      const daten = await antwort.json();
+      const teile = daten?.candidates?.[0]?.content?.parts || [];
+      let textAntwort = teile.map((t) => t.text || "").join(" ").trim();
+      // Sicherheitshalber Formatierungszeichen entfernen, damit nichts Seltsames vorgelesen wird
+      textAntwort = textAntwort.replace(/[*#_`>]/g, "").replace(/\s+/g, " ").trim();
+
+      return json({ antwort: textAntwort || "Darauf weiß ich gerade keine Antwort." });
+    } catch (e) {
+      return json({ antwort: "Ich erreiche mein Gehirn gerade nicht. Frag mich bitte gleich nochmal." });
+    }
+  },
+};
+
+function json(daten, status = 200) {
+  return new Response(JSON.stringify(daten), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
+function text(inhalt) {
+  return new Response(inhalt, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+}

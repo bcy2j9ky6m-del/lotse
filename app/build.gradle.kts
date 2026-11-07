@@ -17,6 +17,12 @@ android {
         targetSdk = 35
         versionCode = buildNummer
         versionName = "0.1.$buildNummer"
+
+        // Server-Adresse und Passwort kommen aus den GitHub-Geheimnissen, nicht aus dem Code
+        val server = System.getenv("LOTSE_SERVER") ?: ""
+        val token = System.getenv("LOTSE_TOKEN") ?: ""
+        buildConfigField("String", "LOTSE_SERVER", "\"$server\"")
+        buildConfigField("String", "LOTSE_TOKEN", "\"$token\"")
     }
 
     // Fester TEST-Schlüssel, damit neue Versionen über die alte installiert werden können.
@@ -47,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -27,6 +27,9 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: App bauen
+        env:
+          LOTSE_SERVER: ${{ secrets.LOTSE_SERVER }}
+          LOTSE_TOKEN: ${{ secrets.LOTSE_TOKEN }}
         run: gradle assembleDebug --no-daemon
 
       - name: Datei mit Versionsnummer benennen

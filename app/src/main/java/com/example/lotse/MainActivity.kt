@@ -69,7 +69,7 @@ private val Blau = Color(0xFF1F4E8C)
 private val HellBlau = Color(0xFFDCE6F3)
 private val Rand = Color(0xFFE2DCCF)
 
-enum class Zustand { RUHE, HOEREN, ANTWORT }
+enum class Zustand { RUHE, HOEREN, DENKEN, ANTWORT }
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
@@ -78,6 +78,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var erkannterText by mutableStateOf("")
     private var antwortText by mutableStateOf("")
     private var diagnose by mutableStateOf("Prüfe Sprachfunktionen …")
+    private var technik by mutableStateOf("") // kleine Fehlerinfo für Tests, wird nicht vorgelesen
+
+    private val netz by lazy { Netz(applicationContext) }
 
     private var stimme: TextToSpeech? = null
     private var stimmeBereit = false
@@ -99,11 +102,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     onTaste = { tasteGedrueckt() }
                 )
                 Zustand.HOEREN -> HoerenBildschirm(
+                    titel = "Ich höre zu …",
+                    kartenTitel = "Du sagst:",
+                    text = erkannterText,
+                    onAbbrechen = { abbrechen() }
+                )
+                Zustand.DENKEN -> HoerenBildschirm(
+                    titel = "Ich überlege …",
+                    kartenTitel = "Du hast gesagt:",
                     text = erkannterText,
                     onAbbrechen = { abbrechen() }
                 )
                 Zustand.ANTWORT -> AntwortBildschirm(
                     antwort = antwortText,
+                    technik = technik,
                     onNochmal = { tasteGedrueckt() },
                     onFertig = { abbrechen() }
                 )
@@ -127,7 +139,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val hoeren = if (SpeechRecognizer.isRecognitionAvailable(this)) "ja" else "NEIN"
         val sprechen = if (stimmeBereit) "ja" else "NEIN"
         val version = packageManager.getPackageInfo(packageName, 0).versionName
-        diagnose = "Version $version · Zuhören: $hoeren · Deutsche Stimme: $sprechen"
+        val gehirn = if (netz.serverEingerichtet) "ja" else "NEIN"
+        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn"
     }
 
     private fun tasteGedrueckt() {
@@ -183,6 +196,33 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         zustand = Zustand.RUHE
     }
 
+    // Erst einfache Fragen selbst beantworten (geht auch ohne Internet), sonst den Server fragen
+    private fun beantworte(satz: String) {
+        technik = ""
+        val lokal = lokaleAntwort(satz)
+        if (lokal != null) {
+            antworten(lokal)
+            return
+        }
+        if (!netz.serverEingerichtet) {
+            antworten("Du hast gesagt: $satz")
+            return
+        }
+        zustand = Zustand.DENKEN
+        val jetzt = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm 'Uhr'", Locale.GERMANY).format(Date())
+        Thread {
+            val antwort = try {
+                netz.frage(satz, jetzt)
+            } catch (e: Exception) {
+                technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                "Ich habe gerade keine Verbindung. Versuch es bitte gleich nochmal."
+            }
+            runOnUiThread {
+                if (zustand == Zustand.DENKEN) antworten(antwort)
+            }
+        }.start()
+    }
+
     // Antwort anzeigen und vorlesen, nach 15 Sekunden zurück zum Ruhebildschirm
     private fun antworten(text: String) {
         antwortText = text
@@ -211,7 +251,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 antworten("Ich habe dich nicht verstanden. Drück einfach nochmal die Taste.")
             } else {
                 erkannterText = text
-                antworten("Du hast gesagt: $text")
+                beantworte(text)
             }
         }
 
@@ -312,7 +352,7 @@ fun Ruhebildschirm(diagnose: String, onTaste: () -> Unit) {
 }
 
 @Composable
-fun HoerenBildschirm(text: String, onAbbrechen: () -> Unit) {
+fun HoerenBildschirm(titel: String, kartenTitel: String, text: String, onAbbrechen: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -336,10 +376,10 @@ fun HoerenBildschirm(text: String, onAbbrechen: () -> Unit) {
                 Mikrofon(groesse = 80.dp)
             }
         }
-        Text("Ich höre zu …", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Schrift)
+        Text(titel, fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Schrift)
 
         Karte {
-            Text("Du sagst:", fontSize = 20.sp, color = Grau)
+            Text(kartenTitel, fontSize = 20.sp, color = Grau)
             Text(
                 if (text.isBlank()) "…" else "„$text“",
                 fontSize = 28.sp,
@@ -364,7 +404,7 @@ fun HoerenBildschirm(text: String, onAbbrechen: () -> Unit) {
 }
 
 @Composable
-fun AntwortBildschirm(antwort: String, onNochmal: () -> Unit, onFertig: () -> Unit) {
+fun AntwortBildschirm(antwort: String, technik: String, onNochmal: () -> Unit, onFertig: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -375,6 +415,9 @@ fun AntwortBildschirm(antwort: String, onNochmal: () -> Unit, onFertig: () -> Un
         Text("Lotse sagt:", fontSize = 22.sp, color = Grau)
         Karte {
             Text(antwort, fontSize = 32.sp, lineHeight = 40.sp, color = Schrift)
+        }
+        if (technik.isNotBlank()) {
+            Text("Test-Info: $technik", fontSize = 13.sp, color = Grau)
         }
 
         Spacer(Modifier.weight(1f))
@@ -453,6 +496,25 @@ fun Mikrofon(groesse: Dp, farbe: Color = Color.White) {
         drawLine(farbe, Offset(w * 0.5f, h * 0.72f), Offset(w * 0.5f, h * 0.9f), strich, StrokeCap.Round)
         drawLine(farbe, Offset(w * 0.34f, h * 0.92f), Offset(w * 0.66f, h * 0.92f), strich, StrokeCap.Round)
     }
+}
+
+// Einfache Fragen, die Lotse ohne Internet beantwortet
+fun lokaleAntwort(satz: String): String? {
+    val t = satz.lowercase(Locale.GERMANY)
+    val jetzt = Calendar.getInstance()
+    val stunde = jetzt.get(Calendar.HOUR_OF_DAY)
+    val minute = jetzt.get(Calendar.MINUTE)
+
+    if ("wie spät" in t || "wie viel uhr" in t || "wieviel uhr" in t || "uhrzeit" in t) {
+        return if (minute == 0) "Es ist $stunde Uhr." else "Es ist $stunde Uhr $minute."
+    }
+    if ("welcher tag" in t || "welchen tag" in t || "welches datum" in t ||
+        "der wievielte" in t || "den wievielten" in t || "datum" in t
+    ) {
+        val datum = SimpleDateFormat("EEEE, 'der' d. MMMM yyyy", Locale.GERMANY).format(jetzt.time)
+        return "Heute ist $datum."
+    }
+    return null
 }
 
 fun tageszeit(stunde: Int): String = when (stunde) {
