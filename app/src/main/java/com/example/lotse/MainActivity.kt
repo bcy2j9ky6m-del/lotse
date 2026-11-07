@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     @Deprecated("Für Android 6 bewusst so gelöst")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             zuhoerenStarten()
