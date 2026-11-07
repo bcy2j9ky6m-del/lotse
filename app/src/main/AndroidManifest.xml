@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Internet für Spracherkennung und später für Claude -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Adressbuch, Anrufen und Anrufliste -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Nötig ab Android 11, damit Lotse Spracherkennung und Stimme findet -->
     <queries>
