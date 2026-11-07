@@ -14,6 +14,7 @@ Neue Versionen werden nach jeder Änderung automatisch gebaut (Reiter *Actions*,
 ## Stand
 
 - Schritt 1: Ruhebildschirm mit Wochentag, Datum, Uhrzeit, Tageszeit und großer Sprechtaste ✔
+- Schritt 2: Zuhören (Spracherkennung Deutsch) und Nachsprechen (Sprachausgabe) ✔
 
 ## Hinweis
 

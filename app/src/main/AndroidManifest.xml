@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Mikrofon für die Spracherkennung -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Internet für Spracherkennung und später für Claude -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Nötig ab Android 11, damit Lotse Spracherkennung und Stimme findet -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@android:drawable/ic_btn_speak_now"
