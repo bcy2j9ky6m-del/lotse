@@ -29,14 +29,15 @@ jobs:
       - name: App bauen
         run: gradle assembleDebug --no-daemon
 
-      - name: Datei umbenennen
-        run: cp app/build/outputs/apk/debug/app-debug.apk lotse.apk
+      - name: Datei mit Versionsnummer benennen
+        run: cp app/build/outputs/apk/debug/app-debug.apk lotse-0.1.${{ github.run_number }}.apk
 
       - name: Download-Seite aktualisieren
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete aktuell --yes --cleanup-tag || true
-          gh release create aktuell lotse.apk \
-            --title "Lotse – aktuelle Testversion" \
-            --notes "Version 0.1.${{ github.run_number }} vom $(TZ=Europe/Berlin date +'%d.%m.%Y, %H:%M') Uhr"
+          gh release create aktuell lotse-0.1.${{ github.run_number }}.apk \
+            --title "Lotse 0.1.${{ github.run_number }}" \
+            --notes "Version 0.1.${{ github.run_number }} vom $(TZ=Europe/Berlin date +'%d.%m.%Y, %H:%M') Uhr" \
+            --latest

@@ -126,7 +126,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun aktualisiereDiagnose() {
         val hoeren = if (SpeechRecognizer.isRecognitionAvailable(this)) "ja" else "NEIN"
         val sprechen = if (stimmeBereit) "ja" else "NEIN"
-        diagnose = "Test-Info · Zuhören: $hoeren · Deutsche Stimme: $sprechen"
+        val version = packageManager.getPackageInfo(packageName, 0).versionName
+        diagnose = "Version $version · Zuhören: $hoeren · Deutsche Stimme: $sprechen"
     }
 
     private fun tasteGedrueckt() {
