@@ -226,7 +226,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         aktualisiereHeute()
-        if (requestCode == 2) return // nur die Kalender-Schreiberlaubnis, kein Zuhören starten
+        if (requestCode == 2) {
+            // Kalender-Schreiberlaubnis: bei Erfolg den Testtermin sofort anlegen
+            if (erlaubt(Manifest.permission.WRITE_CALENDAR)) beantworte("Testtermin")
+            else antworten("Ohne Erlaubnis kann ich keinen Termin eintragen.")
+            return
+        }
         if (erlaubt(Manifest.permission.RECORD_AUDIO)) {
             zuhoerenStarten()
         } else {
@@ -339,7 +344,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             Befehl.Testtermin -> {
                 if (!erlaubt(Manifest.permission.WRITE_CALENDAR)) {
                     requestPermissions(arrayOf(Manifest.permission.WRITE_CALENDAR), 2)
-                    antworten("Bitte erlaube mir, in den Kalender zu schreiben. Dann sag nochmal: Testtermin.")
                     return
                 }
                 val text = try { Kalender.testterminAnlegen(this) } catch (e: Exception) {
