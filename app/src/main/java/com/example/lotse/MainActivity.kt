@@ -21,6 +21,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,7 +79,7 @@ private val Rand = Color(0xFFE2DCCF)
 private val Sand = Color(0xFFE8D9C4)
 private val Braun = Color(0xFF5A4325)
 
-enum class Zustand { RUHE, HOEREN, DENKEN, RUECKFRAGE, ANTWORT }
+enum class Zustand { RUHE, HOEREN, DENKEN, RUECKFRAGE, ANTWORT, PFLEGE }
 
 // Eine offene Frage an Omama: entweder "Soll ich X anrufen?" oder "Wen meinst du?"
 enum class Zweck { ANRUFEN, SMS }
@@ -138,7 +140,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
         setContent {
             when (zustand) {
-                Zustand.RUHE -> Ruhebildschirm(diagnose = diagnose, heute = heuteText, onTaste = { tasteGedrueckt() })
+                Zustand.RUHE -> Ruhebildschirm(
+                    diagnose = diagnose, heute = heuteText,
+                    onTaste = { tasteGedrueckt() },
+                    onVersteckt = { pflegeOeffnen() }
+                )
+                Zustand.PFLEGE -> PflegeBildschirm(
+                    hatPin = Kiosk.hatPin(this),
+                    kioskAktiv = Kiosk.istGeraeteinhaber(this),
+                    onPinNeu = { pin -> Kiosk.pinSetzen(this, pin) },
+                    onPinPruefen = { pin -> Kiosk.pinRichtig(this, pin) },
+                    onEinstellungen = {
+                        Kiosk.entsperren(this)
+                        zustand = Zustand.RUHE
+                        startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                    },
+                    onKioskAus = {
+                        Kiosk.ganzAusschalten(this)
+                        aktualisiereDiagnose()
+                        antworten("Der Kiosk-Modus ist ausgeschaltet. Das Handy verhält sich wieder normal.")
+                    },
+                    onZurueck = { zustand = Zustand.RUHE }
+                )
                 Zustand.HOEREN -> HoerenBildschirm(
                     titel = "Ich höre zu …", kartenTitel = "Du sagst:",
                     text = erkannterText, onAbbrechen = { abbrechen() }
@@ -215,7 +238,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val gehirn = if (netz.serverEingerichtet) "ja" else "NEIN"
         val version = packageManager.getPackageInfo(packageName, 0).versionName
         val telefon = if (istTelefonApp()) "ja" else "NEIN"
-        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon"
+        val kiosk = if (Kiosk.istGeraeteinhaber(this)) "ja" else "NEIN"
+        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon · Kiosk: $kiosk"
     }
 
     // ---------- Berechtigungen ----------
@@ -398,7 +422,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 netz.frage(satz, jetzt)
             } catch (e: Exception) {
                 technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
-                "Ich habe gerade keine Verbindung. Versuch es bitte gleich nochmal."
+                "Ich habe gerade kein Internet. Anrufen, Nachrichten und Termine gehen trotzdem."
             }
             runOnUiThread { if (zustand == Zustand.DENKEN) antworten(antwort) }
         }.start()
@@ -533,6 +557,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         anrufZiel = null
         mithoeren = false
         zustand = Zustand.RUHE
+        Kiosk.sperren(this) // nach dem Pflege-Menü wieder sperren
     }
 
     // ---------- Anrufen ----------
@@ -796,7 +821,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val kontakt = anrufZiel ?: return
         anrufZiel = null
         try {
-            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(kontakt.nummer))))
+            val adresse = Uri.fromParts("tel", kontakt.nummer, null)
+            if (istTelefonApp()) {
+                // Als Telefon-App direkt wählen – funktioniert auch im Kiosk-Modus
+                val telecom = getSystemService(TELECOM_SERVICE) as android.telecom.TelecomManager
+                telecom.placeCall(adresse, Bundle())
+            } else {
+                startActivity(Intent(Intent.ACTION_CALL, adresse))
+            }
         } catch (e: Exception) {
             technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
             antworten("Das Anrufen hat nicht geklappt.")
@@ -812,6 +844,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         handler.removeCallbacks(regelmaessig)
         handler.postDelayed(regelmaessig, 2_000) // kurz warten, bis die Stimme bereit ist
         Ereignisse.neueSms = smsEmpfangen
+        // Kiosk: einrichten und Lotse sperren (nur wenn Lotse Geräteinhaber ist)
+        Kiosk.einrichten(this)
+        if (zustand != Zustand.PFLEGE) Kiosk.sperren(this)
+    }
+
+    // Versteckter Zugang für Pflege und Familie: 7× schnell auf den Wochentag tippen
+    private fun pflegeOeffnen() {
+        handler.removeCallbacks(zurueckZurRuhe)
+        stimme?.stop()
+        zustand = Zustand.PFLEGE
+        handler.postDelayed(zurueckZurRuhe, 120_000) // nach 2 Minuten automatisch zurück
     }
 
     override fun onPause() {
@@ -832,7 +875,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 // ---------- Bildschirme ----------
 
 @Composable
-fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
+fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit, onVersteckt: () -> Unit) {
+    var tipps by remember { mutableStateOf(0) }
+    var ersterTipp by remember { mutableStateOf(0L) }
     var jetzt by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -851,7 +896,19 @@ fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(wochentag, fontSize = 48.sp, fontWeight = FontWeight.Bold, color = Schrift)
+        Text(
+            wochentag, fontSize = 48.sp, fontWeight = FontWeight.Bold, color = Schrift,
+            // Unsichtbarer Zugang: 7× innerhalb von 4 Sekunden tippen
+            modifier = Modifier.clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                val jetztMs = System.currentTimeMillis()
+                if (jetztMs - ersterTipp > 4000) { ersterTipp = jetztMs; tipps = 0 }
+                tipps++
+                if (tipps >= 7) { tipps = 0; onVersteckt() }
+            }
+        )
         Text(datum, fontSize = 28.sp, color = Schrift)
         Spacer(Modifier.height(8.dp))
         Text(uhrzeit, fontSize = 92.sp, lineHeight = 96.sp, fontWeight = FontWeight.Bold, color = Schrift)

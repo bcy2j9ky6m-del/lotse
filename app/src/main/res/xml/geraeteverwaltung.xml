@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lotse braucht keine besonderen Richtlinien, nur die Rolle als Geräteinhaber für den Kiosk-Modus -->
+<device-admin>
+    <uses-policies />
+</device-admin>
