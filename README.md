@@ -18,6 +18,7 @@ Neue Versionen werden nach jeder Änderung automatisch gebaut (Reiter *Actions*,
 - Schritt 3: Antworten über den Lotse-Server (`server/worker.js`, Cloudflare Worker, zum Testen mit Gemini); Uhrzeit und Datum beantwortet Lotse auch ohne Internet ✔
 - Schritt 4: Adressbuch, Anrufen mit Rückfrage („Ich rufe jetzt … an. Okay?“), Auswahl bei mehreren Treffern, „Wer hat angerufen?“ ✔
 - Schritt 5: Kalender vorlesen (heute, morgen, Wochentag, nächste Woche), „Wann kommt …?“, nächster Termin auf dem Ruhebildschirm, Morgengruß ab 9 Uhr ✔
+- Selbst-Update per Sprachbefehl („Update“, „Aktualisiere dich“): sucht die neueste Version, lädt sie und öffnet die Installation ✔
 
 ## Hinweis
 

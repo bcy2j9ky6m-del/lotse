@@ -57,6 +57,23 @@ class Netz(private val context: Context) {
         return ssl.socketFactory
     }
 
+    // Einfache Abfrage einer Internetadresse (z. B. GitHub nach neuen Versionen fragen)
+    fun hole(adresse: String): String {
+        val verbindung = URL(adresse).openConnection() as HttpURLConnection
+        if (verbindung is HttpsURLConnection) verbindung.sslSocketFactory = sslFabrik
+        try {
+            verbindung.connectTimeout = 10_000
+            verbindung.readTimeout = 20_000
+            verbindung.setRequestProperty("User-Agent", "Lotse-App")
+            verbindung.setRequestProperty("Accept", "application/vnd.github+json")
+            val code = verbindung.responseCode
+            if (code !in 200..299) throw IllegalStateException("Antwort $code")
+            return verbindung.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } finally {
+            verbindung.disconnect()
+        }
+    }
+
     // Schickt den Satz an den Server und liefert die vorlesbare Antwort.
     // Wirft eine Exception, wenn keine Verbindung möglich ist.
     fun frage(satz: String, jetzt: String): String {

@@ -13,6 +13,7 @@ sealed class Befehl {
     object TerminEintragen : Befehl()
     object Morgengruss : Befehl()
     object KalenderPruefen : Befehl()
+    object Update : Befehl()
     object Keiner : Befehl()
 }
 
@@ -54,6 +55,11 @@ object Befehle {
         if ((t.contains("wer hat") && t.contains("angerufen")) ||
             t.contains("verpasste anrufe") || t.contains("letzte anrufe") || t.contains("letzten anrufe")
         ) return Befehl.WerHatAngerufen
+
+        val w = t.split(" ")
+        if (w.any { it in setOf("update", "updates", "apdate", "abdate", "updaten", "upgrade") } ||
+            t.contains("aktualisier") || t.contains("neue version") || t.contains("neueste version")
+        ) return Befehl.Update
 
         kalenderBefehl(t)?.let { return it }
 

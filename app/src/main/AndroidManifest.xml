@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- Neue Versionen selbst installieren (ab Android 8 nötig) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Kalender lesen -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />

@@ -334,6 +334,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             Befehl.Morgengruss, Befehl.KalenderPruefen -> {
                 kalenderAntwort(befehl); return
             }
+            Befehl.Update -> { updateStarten(); return }
             Befehl.TerminEintragen -> {
                 antworten("Termine eintragen kann ich noch nicht. Das macht Bafti für dich. Ich kann dir aber sagen, was du vorhast.")
                 return
@@ -357,6 +358,68 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 "Ich habe gerade keine Verbindung. Versuch es bitte gleich nochmal."
             }
             runOnUiThread { if (zustand == Zustand.DENKEN) antworten(antwort) }
+        }.start()
+    }
+
+    // ---------- Selbst aktualisieren ----------
+
+    private var downloadId = -1L
+
+    private val downloadBeobachten = object : Runnable {
+        override fun run() {
+            if (downloadId < 0) return
+            val stand = Updater.stand(this@MainActivity, downloadId)
+            when {
+                stand == "läuft" -> handler.postDelayed(this, 1000)
+                stand == "fertig" -> {
+                    val id = downloadId
+                    downloadId = -1
+                    try {
+                        antworten("Fertig geladen. Tippe gleich auf Installieren. Danach startet Lotse neu.")
+                        handler.postDelayed({ Updater.installiere(this@MainActivity, id) }, 4000)
+                    } catch (e: Exception) {
+                        technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                        antworten("Die neue Version ist geladen, aber ich kann die Installation nicht öffnen.")
+                    }
+                }
+                else -> {
+                    downloadId = -1
+                    technik = "Download $stand"
+                    antworten("Das Herunterladen hat nicht geklappt. Versuch es später nochmal.")
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installierteNummer(): Int = packageManager.getPackageInfo(packageName, 0).versionCode
+
+    private fun updateStarten() {
+        technik = ""
+        zustand = Zustand.DENKEN
+        Thread {
+            val ergebnis: () -> Unit = try {
+                val neu = Updater.suche(netz, installierteNummer())
+                if (neu == null) {
+                    val version = packageManager.getPackageInfo(packageName, 0).versionName
+                    ({ antworten("Ich bin schon auf dem neuesten Stand. Version $version.") })
+                } else {
+                    ({
+                        downloadId = Updater.ladeHerunter(this, neu)
+                        antworten("Es gibt eine neue Version: ${neu.version}. Ich lade sie jetzt herunter. Das dauert einen Moment.")
+                        handler.postDelayed(downloadBeobachten, 1000)
+                    })
+                }
+            } catch (e: Exception) {
+                technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                ({ antworten("Ich kann gerade nicht nach neuen Versionen suchen.") })
+            }
+            runOnUiThread {
+                try { ergebnis() } catch (e: Exception) {
+                    technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                    antworten("Das Herunterladen konnte nicht starten.")
+                }
+            }
         }.start()
     }
 
