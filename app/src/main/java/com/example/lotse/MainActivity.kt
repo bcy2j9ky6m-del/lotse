@@ -80,7 +80,7 @@ private val Braun = Color(0xFF5A4325)
 enum class Zustand { RUHE, HOEREN, DENKEN, RUECKFRAGE, ANTWORT }
 
 // Eine offene Frage an Omama: entweder "Soll ich X anrufen?" oder "Wen meinst du?"
-enum class Zweck { ANRUFEN, SMS, NOTRUF }
+enum class Zweck { ANRUFEN, SMS }
 
 data class Rueckfrage(
     val frage: String,
@@ -135,17 +135,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         stimme = TextToSpeech(this, this)
-        registerReceiver(einschalttaste, android.content.IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-        })
 
         setContent {
             when (zustand) {
-                Zustand.RUHE -> Ruhebildschirm(
-                    diagnose = diagnose, heute = heuteText,
-                    onTaste = { tasteGedrueckt() }, onHilfe = { notfallStarten() }
-                )
+                Zustand.RUHE -> Ruhebildschirm(diagnose = diagnose, heute = heuteText, onTaste = { tasteGedrueckt() })
                 Zustand.HOEREN -> HoerenBildschirm(
                     titel = "Ich höre zu …", kartenTitel = "Du sagst:",
                     text = erkannterText, onAbbrechen = { abbrechen() }
@@ -161,22 +154,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         mithoeren = mithoeren,
                         mithoerText = mithoerText,
                         onJa = {
-                            when (r.zweck) {
-                                Zweck.SMS -> sendeSms(r.kandidaten.first(), r.text)
-                                Zweck.NOTRUF -> notrufWaehlen(r.kandidaten.first())
-                                Zweck.ANRUFEN -> anrufen(r.kandidaten.first())
-                            }
+                            if (r.zweck == Zweck.SMS) sendeSms(r.kandidaten.first(), r.text)
+                            else anrufen(r.kandidaten.first())
                         },
                         onWahl = { k -> gewaehlt(r, k) },
-                        onNein = {
-                            abgebrochen(
-                                when (r.zweck) {
-                                    Zweck.SMS -> "Gut, dann schicke ich nichts."
-                                    Zweck.NOTRUF -> "Gut, ich rufe niemanden an. Wenn du Hilfe brauchst, sag einfach: Hilfe."
-                                    Zweck.ANRUFEN -> "Gut, ich rufe nicht an."
-                                }
-                            )
-                        }
+                        onNein = { abgebrochen(if (r.zweck == Zweck.SMS) "Gut, dann schicke ich nichts." else "Gut, ich rufe nicht an.") }
                     )
                 }
                 Zustand.ANTWORT -> AntwortBildschirm(
@@ -233,8 +215,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val gehirn = if (netz.serverEingerichtet) "ja" else "NEIN"
         val version = packageManager.getPackageInfo(packageName, 0).versionName
         val telefon = if (istTelefonApp()) "ja" else "NEIN"
-        val notfall = einstellungen.getString("notfallName", null) ?: "NEIN"
-        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon · Notfall: $notfall"
+        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon"
     }
 
     // ---------- Berechtigungen ----------
@@ -348,7 +329,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                     "Ich habe nichts verstanden. Drück einfach nochmal die Taste."
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
-                    "Ich habe gerade kein Internet und verstehe dich deshalb nicht. Wenn du Hilfe brauchst, drück den roten Knopf: Hilfe."
+                    "Ich habe gerade kein Internet. Bitte versuch es gleich nochmal."
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Ich darf das Mikrofon nicht benutzen."
                 else -> "Da hat etwas nicht geklappt. Drück nochmal die Taste. (Fehler $error)"
             }
@@ -382,14 +363,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             Befehl.Update -> { updateStarten(); return }
             Befehl.NachrichtenLesen -> { nachrichtenVorlesen(); return }
             Befehl.TelefonEinrichten -> { telefonEinrichten(); return }
-            Befehl.Notfall -> { notfallStarten(); return }
-            is Befehl.NotfallkontaktSetzen -> { notfallkontaktSetzen(befehl.name); return }
-            Befehl.NotfallkontaktAbfragen -> {
-                val name = einstellungen.getString("notfallName", null)
-                antworten(if (name == null) "Ich habe noch keinen Notfallkontakt. Sag zum Beispiel: Notfallkontakt Bafti."
-                else "Dein Notfallkontakt ist $name. Wenn du Hilfe brauchst, sag einfach: Hilfe.")
-                return
-            }
             is Befehl.SmsSchreiben -> { smsVorbereiten(befehl.rest); return }
             is Befehl.Zurueckschreiben -> { zurueckschreiben(befehl.text); return }
             Befehl.Testtermin -> {
@@ -425,7 +398,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 netz.frage(satz, jetzt)
             } catch (e: Exception) {
                 technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
-                "Ich habe gerade kein Internet. Anrufen, Nachrichten und Termine gehen trotzdem."
+                "Ich habe gerade keine Verbindung. Versuch es bitte gleich nochmal."
             }
             runOnUiThread { if (zustand == Zustand.DENKEN) antworten(antwort) }
         }.start()
@@ -554,7 +527,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun abbrechen() {
         handler.removeCallbacks(zurueckZurRuhe)
-        handler.removeCallbacks(notrufAutomatisch)
         erkenner?.cancel()
         stimme?.stop()
         rueckfrage = null
@@ -619,7 +591,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             abgebrochen(
                 when {
                     r.zweck == Zweck.SMS -> "Gut, dann schicke ich nichts."
-                    r.zweck == Zweck.NOTRUF -> "Gut, ich rufe niemanden an. Wenn du Hilfe brauchst, sag einfach: Hilfe."
                     r.bestaetigen -> "Gut, ich rufe nicht an."
                     else -> "Gut, dann nicht."
                 }
@@ -627,12 +598,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             return
         }
         if (r.bestaetigen) {
-            if (Befehle.istJa(antwort) || (r.zweck == Zweck.NOTRUF && Befehle.erkenne(antwort) == Befehl.Notfall)) {
-                when (r.zweck) {
-                    Zweck.SMS -> sendeSms(r.kandidaten.first(), r.text)
-                    Zweck.NOTRUF -> notrufWaehlen(r.kandidaten.first())
-                    Zweck.ANRUFEN -> anrufen(r.kandidaten.first())
-                }
+            if (Befehle.istJa(antwort)) {
+                if (r.zweck == Zweck.SMS) sendeSms(r.kandidaten.first(), r.text) else anrufen(r.kandidaten.first())
                 return
             }
         } else {
@@ -653,108 +620,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             r.text.isBlank() -> diktieren(k)
             else -> bestaetigeSms(k, r.text)
         }
-    }
-
-    // ---------- Notfall (ohne Server, ohne Internet) ----------
-
-    // Kommt keine Antwort, ruft Lotse nach 30 Sekunden trotzdem an
-    private val notrufAutomatisch = Runnable {
-        val r = rueckfrage
-        if (zustand == Zustand.RUECKFRAGE && r != null && r.zweck == Zweck.NOTRUF) {
-            sprich("Ich habe keine Antwort gehört. Ich rufe jetzt ${r.kandidaten.first().name} an.", "info")
-            handler.postDelayed({ notrufWaehlen(r.kandidaten.first()) }, 4000)
-        }
-    }
-
-    private fun notfallStarten() {
-        technik = ""
-        // Auch bei gesperrtem Bildschirm sichtbar machen
-        @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-        )
-        val name = einstellungen.getString("notfallName", null)
-        val nummer = einstellungen.getString("notfallNummer", null)
-        val kontakt = if (name != null && nummer != null) Kontakt(name, nummer) else Kontakt("Notruf 112", "112")
-        val frage = if (nummer != null) "Brauchst du Hilfe? Soll ich $name anrufen?"
-        else "Ich habe keinen Notfallkontakt gespeichert. Soll ich den Notruf 112 rufen?"
-        frageNach(Rueckfrage(frage, listOf(kontakt), bestaetigen = true, zweck = Zweck.NOTRUF))
-        handler.removeCallbacks(notrufAutomatisch)
-        if (nummer != null) handler.postDelayed(notrufAutomatisch, 30_000) // 112 nie ohne Bestätigung
-    }
-
-    private fun notrufWaehlen(kontakt: Kontakt) {
-        handler.removeCallbacks(notrufAutomatisch)
-        if (kontakt.nummer != "112") {
-            anrufen(kontakt)
-            return
-        }
-        handler.removeCallbacks(zurueckZurRuhe)
-        erkenner?.cancel()
-        rueckfrage = null
-        mithoeren = false
-        try {
-            // Notrufnummern darf nur die Telefon-App direkt wählen
-            val telecom = getSystemService(TELECOM_SERVICE) as android.telecom.TelecomManager
-            telecom.placeCall(Uri.parse("tel:112"), Bundle())
-            antworten("Ich rufe den Notruf 112.")
-        } catch (e: Exception) {
-            // Sonst wenigstens die Nummer im Telefon öffnen
-            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
-            antworten("Drück jetzt auf den grünen Hörer, dann wird der Notruf gewählt.")
-        }
-    }
-
-    private fun notfallkontaktSetzen(name: String) {
-        if (name.isBlank()) {
-            antworten("Wen soll ich im Notfall anrufen? Sag zum Beispiel: Notfallkontakt Bafti.")
-            return
-        }
-        if (!erlaubt(Manifest.permission.READ_CONTACTS)) {
-            antworten("Ich darf das Adressbuch nicht lesen. Bitte erlaube es in den Einstellungen.")
-            return
-        }
-        val treffer = Kontakte.suche(this, name)
-        when {
-            treffer.isEmpty() -> antworten("Ich habe niemanden mit dem Namen ${name.replaceFirstChar { it.uppercase() }} im Adressbuch gefunden.")
-            treffer.size > 1 -> antworten("Ich kenne mehrere: ${treffer.take(3).joinToString(", ") { it.name }}. Sag bitte den ganzen Namen.")
-            else -> {
-                val k = treffer[0]
-                einstellungen.edit().putString("notfallName", k.name).putString("notfallNummer", k.nummer).apply()
-                aktualisiereDiagnose()
-                val ende = k.nummer.filter { it.isDigit() }.takeLast(2)
-                antworten("Erledigt. Im Notfall rufe ich ${k.name} an, die Nummer endet auf $ende. Wenn du Hilfe brauchst, sag einfach: Hilfe.")
-            }
-        }
-    }
-
-    // Einschalttaste dreimal schnell drücken = Notfall
-    private val tastenZeiten = ArrayDeque<Long>()
-    private val einschalttaste = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context, intent: Intent) {
-            val jetzt = System.currentTimeMillis()
-            tastenZeiten.addLast(jetzt)
-            while (tastenZeiten.isNotEmpty() && jetzt - tastenZeiten.first() > 2500) tastenZeiten.removeFirst()
-            if (tastenZeiten.size >= 3) {
-                tastenZeiten.clear()
-                bildschirmWecken()
-                startActivity(Intent(this@MainActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
-                notfallStarten()
-            }
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun bildschirmWecken() {
-        try {
-            val power = getSystemService(POWER_SERVICE) as android.os.PowerManager
-            power.newWakeLock(
-                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "lotse:notfall"
-            ).acquire(30_000)
-        } catch (_: Exception) {}
     }
 
     // ---------- Telefon-App werden ----------
@@ -905,7 +770,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun abgebrochen(text: String) {
-        handler.removeCallbacks(notrufAutomatisch)
         rueckfrage = null
         erkenner?.cancel()
         mithoeren = false
@@ -957,10 +821,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        try { unregisterReceiver(einschalttaste) } catch (_: Exception) {}
         handler.removeCallbacks(zurueckZurRuhe)
         handler.removeCallbacks(regelmaessig)
-        handler.removeCallbacks(notrufAutomatisch)
         erkenner?.destroy()
         stimme?.shutdown()
         super.onDestroy()
@@ -970,7 +832,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 // ---------- Bildschirme ----------
 
 @Composable
-fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit, onHilfe: () -> Unit) {
+fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
     var jetzt by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -1015,14 +877,6 @@ fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit, onHilfe
                 Text("Drücken\nund sprechen", fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
             }
         }
-        // Hilfe-Knopf: fragt immer erst nach, bevor jemand angerufen wird
-        OutlinedButton(
-            onClick = onHilfe,
-            modifier = Modifier.fillMaxWidth().height(58.dp),
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(3.dp, Color(0xFFB3261E)),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = Color(0xFFB3261E))
-        ) { Text("HILFE", fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         Text(diagnose, fontSize = 13.sp, color = Grau, textAlign = TextAlign.Center)
     }
 }
@@ -1094,11 +948,6 @@ fun RueckfrageBildschirm(
                     Text("Nachricht an ${k.name}", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
                     Karte { Text("„${rueckfrage.text}“", fontSize = 26.sp, lineHeight = 32.sp, color = Schrift) }
                     Text("Soll ich das schicken?", fontSize = 28.sp, color = Schrift)
-                } else if (rueckfrage.zweck == Zweck.NOTRUF) {
-                    Text("Hilfe rufen?", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB3261E))
-                    Bildchen(k, 140.dp)
-                    Text(k.name, fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
-                    Text("Soll ich anrufen?", fontSize = 28.sp, color = Schrift)
                 } else {
                     Bildchen(k, 170.dp)
                     Text(k.name, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
