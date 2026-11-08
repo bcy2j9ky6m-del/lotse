@@ -12,6 +12,7 @@ sealed class Befehl {
     data class WannIst(val suchwort: String) : Befehl()
     object TerminEintragen : Befehl()
     object Morgengruss : Befehl()
+    object KalenderPruefen : Befehl()
     object Keiner : Befehl()
 }
 
@@ -74,6 +75,9 @@ object Befehle {
         val woerter = t.split(" ")
 
         if (t.startsWith("guten morgen")) return Befehl.Morgengruss
+        if ((t.contains("kalender") && (t.contains("prüf") || t.contains("test") || t.contains("check"))) ||
+            t.contains("kalendertest")
+        ) return Befehl.KalenderPruefen
 
         if ((t.contains("trag") && t.contains("ein")) || t.contains("termin eintragen") ||
             t.contains("termin machen") || t.contains("neuen termin")

@@ -55,7 +55,89 @@ object Kalender {
                 if (vergleich in anfang until ende) liste.add(Termin(titel, vergleich, ganztags, ort))
             }
         }
+        // Zweiter Weg: einfache (nicht wiederkehrende) Termine direkt aus der Termin-Tabelle lesen.
+        // Manche ältere Handys füllen die "Instances"-Liste nicht zuverlässig.
+        try {
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Events.TITLE,
+                    CalendarContract.Events.DTSTART,
+                    CalendarContract.Events.ALL_DAY,
+                    CalendarContract.Events.EVENT_LOCATION
+                ),
+                "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} < ? AND ${CalendarContract.Events.DELETED} = 0",
+                arrayOf((anfang - tag).toString(), (ende + tag).toString()),
+                CalendarContract.Events.DTSTART + " ASC"
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val titel = c.getString(0)?.takeIf { it.isNotBlank() } ?: "Termin"
+                    val beginn = c.getLong(1)
+                    val ganztags = c.getInt(2) == 1
+                    val ort = c.getString(3)?.takeIf { it.isNotBlank() }
+                    val vergleich = if (ganztags) ganztagsBeginnLokal(beginn) else beginn
+                    val schonDa = liste.any { it.titel == titel && it.beginn == vergleich }
+                    if (!schonDa && vergleich in anfang until ende) liste.add(Termin(titel, vergleich, ganztags, ort))
+                }
+            }
+        } catch (_: Exception) {
+            // Wenn das nicht geht, bleibt es bei der ersten Liste
+        }
+
         return liste.sortedWith(compareBy({ !it.ganztags }, { it.beginn }))
+    }
+
+    // Für Tests: Was sieht Lotse im Kalender-Speicher des Handys?
+    fun pruefung(context: Context): String {
+        val teile = mutableListOf<String>()
+        try {
+            val kalender = mutableListOf<String>()
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Calendars.ACCOUNT_TYPE,
+                    CalendarContract.Calendars.VISIBLE
+                ),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val sichtbar = if (c.getInt(2) == 1) "sichtbar" else "versteckt"
+                    kalender.add("${c.getString(0)} (${c.getString(1)?.substringAfterLast('.') ?: "?"}, $sichtbar)")
+                }
+            }
+            teile.add("Ich sehe ${kalender.size} Kalender: ${kalender.joinToString("; ")}.")
+        } catch (e: Exception) {
+            teile.add("Kalenderliste nicht lesbar: ${e.javaClass.simpleName}.")
+        }
+
+        val heute = tagesbeginn()
+        val anfang = heute.timeInMillis
+        val ende = tagesbeginn(1).timeInMillis
+        try {
+            var anzahl = 0
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(CalendarContract.Events.TITLE),
+                "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} < ?",
+                arrayOf(anfang.toString(), ende.toString()), null
+            )?.use { c -> anzahl = c.count }
+            teile.add("In der Termin-Tabelle stehen heute $anzahl Termine.")
+        } catch (e: Exception) {
+            teile.add("Termin-Tabelle nicht lesbar: ${e.javaClass.simpleName}.")
+        }
+        try {
+            var anzahl = 0
+            val adresse = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+                ContentUris.appendId(it, anfang); ContentUris.appendId(it, ende)
+            }.build()
+            context.contentResolver.query(adresse, arrayOf(CalendarContract.Instances.TITLE), null, null, null)
+                ?.use { c -> anzahl = c.count }
+            teile.add("In der Terminliste stehen heute $anzahl Termine.")
+        } catch (e: Exception) {
+            teile.add("Terminliste nicht lesbar: ${e.javaClass.simpleName}.")
+        }
+        return teile.joinToString(" ")
     }
 
     private fun ganztagsBeginnLokal(utc: Long): Long {

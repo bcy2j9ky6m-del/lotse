@@ -330,7 +330,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 else antworten("Ich darf die Anrufliste nicht lesen. Bitte erlaube es in den Einstellungen.")
                 return
             }
-            is Befehl.TermineAmTag, is Befehl.TermineMehrereTage, is Befehl.WannIst, Befehl.Morgengruss -> {
+            is Befehl.TermineAmTag, is Befehl.TermineMehrereTage, is Befehl.WannIst,
+            Befehl.Morgengruss, Befehl.KalenderPruefen -> {
                 kalenderAntwort(befehl); return
             }
             Befehl.TerminEintragen -> {
@@ -379,6 +380,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     }
                 }
                 Befehl.Morgengruss -> morgengrussText()
+                Befehl.KalenderPruefen -> Kalender.pruefung(this)
                 else -> "Dazu habe ich nichts gefunden."
             }
         } catch (e: Exception) {
