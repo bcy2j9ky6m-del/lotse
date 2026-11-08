@@ -80,7 +80,16 @@ private val Braun = Color(0xFF5A4325)
 enum class Zustand { RUHE, HOEREN, DENKEN, RUECKFRAGE, ANTWORT }
 
 // Eine offene Frage an Omama: entweder "Soll ich X anrufen?" oder "Wen meinst du?"
-data class Rueckfrage(val frage: String, val kandidaten: List<Kontakt>, val bestaetigen: Boolean)
+enum class Zweck { ANRUFEN, SMS }
+
+data class Rueckfrage(
+    val frage: String,
+    val kandidaten: List<Kontakt>,
+    val bestaetigen: Boolean,
+    val zweck: Zweck = Zweck.ANRUFEN,
+    val text: String = "",      // SMS-Text
+    val diktat: Boolean = false // wartet auf den gesprochenen SMS-Text
+)
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
@@ -144,9 +153,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         gesagt = erkannterText,
                         mithoeren = mithoeren,
                         mithoerText = mithoerText,
-                        onJa = { anrufen(r.kandidaten.first()) },
-                        onWahl = { k -> bestaetigeAnruf(k) },
-                        onNein = { abgebrochen("Gut, ich rufe nicht an.") }
+                        onJa = {
+                            if (r.zweck == Zweck.SMS) sendeSms(r.kandidaten.first(), r.text)
+                            else anrufen(r.kandidaten.first())
+                        },
+                        onWahl = { k -> gewaehlt(r, k) },
+                        onNein = { abgebrochen(if (r.zweck == Zweck.SMS) "Gut, dann schicke ich nichts." else "Gut, ich rufe nicht an.") }
                     )
                 }
                 Zustand.ANTWORT -> AntwortBildschirm(
@@ -214,7 +226,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.READ_CALL_LOG,
-        Manifest.permission.READ_CALENDAR
+        Manifest.permission.READ_CALENDAR,
+        Manifest.permission.READ_SMS,
+        Manifest.permission.RECEIVE_SMS,
+        Manifest.permission.SEND_SMS
     )
 
     private fun tasteGedrueckt() {
@@ -345,6 +360,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 kalenderAntwort(befehl); return
             }
             Befehl.Update -> { updateStarten(); return }
+            Befehl.NachrichtenLesen -> { nachrichtenVorlesen(); return }
+            is Befehl.SmsSchreiben -> { smsVorbereiten(befehl.rest); return }
+            is Befehl.Zurueckschreiben -> { zurueckschreiben(befehl.text); return }
             Befehl.Testtermin -> {
                 if (!erlaubt(Manifest.permission.WRITE_CALENDAR)) {
                     requestPermissions(arrayOf(Manifest.permission.WRITE_CALENDAR), 2)
@@ -555,20 +573,158 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun rueckfrageBeantwortet(antwort: String) {
         val r = rueckfrage ?: return
+
+        // Diktat: Das Gesagte ist der SMS-Text (nur ein einzelnes "Abbrechen"/"Stopp" bricht ab)
+        if (r.diktat) {
+            val einfach = antwort.trim().lowercase(Locale.GERMANY)
+            if (einfach in setOf("abbrechen", "stopp", "stop", "nein", "nichts", "doch nicht")) {
+                abgebrochen("Gut, dann schicke ich nichts.")
+            } else {
+                bestaetigeSms(r.kandidaten.first(), antwort)
+            }
+            return
+        }
+
         if (Befehle.istNein(antwort)) {
-            abgebrochen(if (r.bestaetigen) "Gut, ich rufe nicht an." else "Gut, dann nicht.")
+            abgebrochen(
+                when {
+                    r.zweck == Zweck.SMS -> "Gut, dann schicke ich nichts."
+                    r.bestaetigen -> "Gut, ich rufe nicht an."
+                    else -> "Gut, dann nicht."
+                }
+            )
             return
         }
         if (r.bestaetigen) {
-            if (Befehle.istJa(antwort)) { anrufen(r.kandidaten.first()); return }
+            if (Befehle.istJa(antwort)) {
+                if (r.zweck == Zweck.SMS) sendeSms(r.kandidaten.first(), r.text) else anrufen(r.kandidaten.first())
+                return
+            }
         } else {
-            Befehle.waehle(antwort, r.kandidaten)?.let { bestaetigeAnruf(it); return }
+            Befehle.waehle(antwort, r.kandidaten)?.let { gewaehlt(r, it); return }
         }
         // Nicht verstanden: einmal freundlich nachfragen, dann nur noch die Knöpfe anbieten
         if (nachfragen < 1) {
             nachfragen++
             val hilfe = if (r.bestaetigen) "Sag bitte Ja oder Nein." else "Sag bitte den Namen, oder tipp auf die richtige Person."
             sprich(hilfe, "rueckfrage")
+        }
+    }
+
+    // Eine Person wurde aus mehreren ausgewählt
+    private fun gewaehlt(r: Rueckfrage, k: Kontakt) {
+        when {
+            r.zweck == Zweck.ANRUFEN -> bestaetigeAnruf(k)
+            r.text.isBlank() -> diktieren(k)
+            else -> bestaetigeSms(k, r.text)
+        }
+    }
+
+    // ---------- SMS ----------
+
+    private var letzterAbsender: Sms? = null
+
+    private val smsEmpfangen: (Sms) -> Unit = { sms ->
+        letzterAbsender = sms
+        einstellungen.edit().putLong("smsGelesen", System.currentTimeMillis()).apply()
+        // Nur ansagen, wenn Lotse gerade nichts anderes tut
+        if (zustand == Zustand.RUHE) {
+            technik = ""
+            val hinweis = if (sms.name != null) " Zum Antworten drück die Taste und sag: Antworte, und dann deinen Text." else ""
+            antworten("Du hast eine neue Nachricht. " + Nachrichten.vorlesbar(sms) + hinweis)
+        }
+    }
+
+    private fun nachrichtenVorlesen() {
+        if (!erlaubt(Manifest.permission.READ_SMS)) {
+            antworten("Ich darf deine Nachrichten nicht lesen. Bitte erlaube es in den Einstellungen.")
+            return
+        }
+        val seit = einstellungen.getLong("smsGelesen", System.currentTimeMillis() - 3L * 24 * 60 * 60 * 1000)
+        val neu = Nachrichten.seit(this, seit, 3)
+        val text = if (neu.isEmpty()) {
+            val letzte = Nachrichten.seit(this, 0, 1).firstOrNull()
+            if (letzte == null) "Du hast keine Nachrichten."
+            else {
+                letzterAbsender = letzte
+                "Du hast keine neuen Nachrichten. Die letzte war: " + Nachrichten.vorlesbar(letzte)
+            }
+        } else {
+            letzterAbsender = neu.first()
+            val anzahl = Nachrichten.zaehleSeit(this, seit)
+            val einleitung = if (anzahl == 1) "Du hast eine neue Nachricht." else "Du hast $anzahl neue Nachrichten."
+            val vorgelesen = neu.reversed().joinToString(" ") { Nachrichten.vorlesbar(it) } // älteste zuerst
+            val rest = if (anzahl > neu.size) " Und noch ${anzahl - neu.size} ältere." else ""
+            "$einleitung $vorgelesen$rest"
+        }
+        einstellungen.edit().putLong("smsGelesen", System.currentTimeMillis()).apply()
+        antworten(text)
+    }
+
+    // "Schreib Anna ich komme um drei" → Name und Text trennen
+    private fun smsVorbereiten(rest: String) {
+        if (!erlaubt(Manifest.permission.READ_CONTACTS) || !erlaubt(Manifest.permission.SEND_SMS)) {
+            antworten("Ich darf keine Nachrichten schicken. Bitte erlaube es in den Einstellungen.")
+            return
+        }
+        val woerter = rest.split(" ").filter { it.isNotBlank() }
+        if (woerter.isEmpty()) {
+            antworten("Wem soll ich schreiben? Sag zum Beispiel: Schreib Anna, ich komme um drei.")
+            return
+        }
+        for (n in minOf(3, woerter.size) downTo 1) {
+            val treffer = Kontakte.suche(this, woerter.take(n).joinToString(" "))
+            if (treffer.isEmpty()) continue
+            val text = woerter.drop(n).joinToString(" ").removePrefix("dass ").trim()
+                .replaceFirstChar { it.uppercase(Locale.GERMANY) }
+            when {
+                treffer.size > 1 -> {
+                    val auswahl = treffer.take(3)
+                    val namen = auswahl.joinToString(", ") { it.name }
+                    frageNach(Rueckfrage("Ich kenne mehrere: $namen. Wem soll ich schreiben?", auswahl, false, Zweck.SMS, text))
+                }
+                text.isBlank() -> diktieren(treffer[0])
+                else -> bestaetigeSms(treffer[0], text)
+            }
+            return
+        }
+        antworten("Ich habe niemanden mit dem Namen ${woerter.first().replaceFirstChar { it.uppercase() }} im Adressbuch gefunden.")
+    }
+
+    private fun zurueckschreiben(text: String) {
+        val absender = letzterAbsender
+        if (absender == null) {
+            antworten("Ich weiß nicht, wem ich antworten soll. Sag zum Beispiel: Schreib Anna, ich komme um drei.")
+            return
+        }
+        if (absender.name == null) {
+            antworten("Auf Nachrichten von unbekannten Nummern antworte ich lieber nicht. Frag im Zweifel Bafti.")
+            return
+        }
+        val kontakt = Kontakt(absender.name, absender.nummer)
+        val sauber = text.removePrefix("dass ").trim().replaceFirstChar { it.uppercase(Locale.GERMANY) }
+        if (sauber.isBlank()) diktieren(kontakt) else bestaetigeSms(kontakt, sauber)
+    }
+
+    private fun diktieren(k: Kontakt) {
+        frageNach(Rueckfrage("Was soll ich ${k.name} schreiben?", listOf(k), false, Zweck.SMS, "", diktat = true))
+    }
+
+    private fun bestaetigeSms(k: Kontakt, text: String) {
+        frageNach(Rueckfrage("Ich schicke ${k.name}: $text. Okay?", listOf(k), true, Zweck.SMS, text))
+    }
+
+    private fun sendeSms(k: Kontakt, text: String) {
+        handler.removeCallbacks(zurueckZurRuhe)
+        erkenner?.cancel()
+        mithoeren = false
+        rueckfrage = null
+        try {
+            Nachrichten.sende(k.nummer, text)
+            antworten("Ist verschickt an ${k.name}.")
+        } catch (e: Exception) {
+            technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+            antworten("Die Nachricht konnte ich nicht verschicken.")
         }
     }
 
@@ -614,9 +770,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         aktualisiereDiagnose()
         handler.removeCallbacks(regelmaessig)
         handler.postDelayed(regelmaessig, 2_000) // kurz warten, bis die Stimme bereit ist
+        Ereignisse.neueSms = smsEmpfangen
     }
 
     override fun onPause() {
+        Ereignisse.neueSms = null
         handler.removeCallbacks(regelmaessig)
         super.onPause()
     }
@@ -671,10 +829,11 @@ fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
             shape = RoundedCornerShape(36.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Blau, contentColor = Color.White)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Mikrofon(groesse = 72.dp)
-                Spacer(Modifier.height(12.dp))
-                Text("Drücken\nund sprechen", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            // Mikrofon und Text nebeneinander – passt auch auf kleine Bildschirme
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Mikrofon(groesse = 64.dp)
+                Spacer(Modifier.width(14.dp))
+                Text("Drücken\nund sprechen", fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
             }
         }
         Text(diagnose, fontSize = 13.sp, color = Grau, textAlign = TextAlign.Center)
@@ -733,11 +892,26 @@ fun RueckfrageBildschirm(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (rueckfrage.bestaetigen) {
+            if (rueckfrage.diktat) {
                 val k = rueckfrage.kandidaten.first()
-                Bildchen(k, 170.dp)
-                Text(k.name, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
-                Text("Soll ich anrufen?", fontSize = 30.sp, color = Schrift)
+                Bildchen(k, 120.dp)
+                Text(k.name, fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
+                Text("Was soll ich schreiben?", fontSize = 28.sp, color = Schrift)
+                Karte {
+                    Text(if (mithoerText.isBlank()) "…" else "„$mithoerText“", fontSize = 26.sp, lineHeight = 32.sp, color = Schrift)
+                }
+            } else if (rueckfrage.bestaetigen) {
+                val k = rueckfrage.kandidaten.first()
+                if (rueckfrage.zweck == Zweck.SMS) {
+                    Bildchen(k, 110.dp)
+                    Text("Nachricht an ${k.name}", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
+                    Karte { Text("„${rueckfrage.text}“", fontSize = 26.sp, lineHeight = 32.sp, color = Schrift) }
+                    Text("Soll ich das schicken?", fontSize = 28.sp, color = Schrift)
+                } else {
+                    Bildchen(k, 170.dp)
+                    Text(k.name, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = Schrift, textAlign = TextAlign.Center)
+                    Text("Soll ich anrufen?", fontSize = 30.sp, color = Schrift)
+                }
             } else {
                 Text(rueckfrage.frage, fontSize = 26.sp, lineHeight = 32.sp, color = Schrift, textAlign = TextAlign.Center)
                 rueckfrage.kandidaten.forEach { k ->
@@ -765,6 +939,7 @@ fun RueckfrageBildschirm(
                 Spacer(Modifier.width(8.dp))
             }
             val hinweis = when {
+                rueckfrage.diktat -> if (mithoeren) "Ich höre zu … sprich deine Nachricht" else "Drück „Abbrechen“ oder warte kurz"
                 mithoerText.isNotBlank() -> "„$mithoerText“"
                 mithoeren -> if (rueckfrage.bestaetigen) "Ich höre zu … sag „Ja“ oder „Nein“" else "Ich höre zu … sag den Namen"
                 else -> "Tipp auf einen Knopf"

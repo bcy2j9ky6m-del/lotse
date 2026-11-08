@@ -15,6 +15,9 @@ sealed class Befehl {
     object KalenderPruefen : Befehl()
     object Update : Befehl()
     object Testtermin : Befehl()
+    object NachrichtenLesen : Befehl()
+    data class SmsSchreiben(val rest: String) : Befehl()
+    data class Zurueckschreiben(val text: String) : Befehl()
     object Keiner : Befehl()
 }
 
@@ -62,6 +65,8 @@ object Befehle {
             t.contains("aktualisier") || t.contains("neue version") || t.contains("neueste version")
         ) return Befehl.Update
 
+        nachrichtenBefehl(t)?.let { return it }
+
         kalenderBefehl(t)?.let { return it }
 
         for (muster in anrufMuster) {
@@ -70,6 +75,28 @@ object Befehle {
             if (name.isNotBlank()) return Befehl.Anrufen(name)
         }
         return Befehl.Keiner
+    }
+
+    private val zurueckMuster = Regex("""^(?:bitte\s+)?(?:antworte|antworten|antwort|schreib zurück|schreibe zurück|schreib ihr|schreib ihm|schreibe ihr|schreibe ihm)\b\s*(?:ihr|ihm)?\s*(.*)$""")
+    private val schreibMuster = Regex("""^(?:bitte\s+)?(?:schreib|schreibe|schick|schicke|sende)\s+(.+)$""")
+
+    private fun nachrichtenBefehl(t: String): Befehl? {
+        val woerter = t.split(" ")
+        val ueberNachrichten = woerter.any { it.startsWith("nachricht") || it == "sms" || it == "post" }
+        if (ueberNachrichten && woerter.any {
+                it in setOf("lies", "lese", "vorlesen", "neue", "neuen", "gibt", "habe", "hab", "hast", "zeig", "welche")
+            } && !t.startsWith("schreib") && !t.startsWith("schick")
+        ) return Befehl.NachrichtenLesen
+
+        zurueckMuster.find(t)?.let { return Befehl.Zurueckschreiben(it.groupValues[1].trim()) }
+
+        schreibMuster.find(t)?.let { treffer ->
+            var rest = treffer.groupValues[1]
+            rest = rest.replace(Regex("""^(?:eine\s+|ne\s+)?(?:nachricht|sms)\s+(?:an\s+)?"""), "")
+            rest = rest.replace(Regex("""^an\s+"""), "")
+            return Befehl.SmsSchreiben(rest.trim())
+        }
+        return null
     }
 
     private val wochentage = listOf("sonntag", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag")
