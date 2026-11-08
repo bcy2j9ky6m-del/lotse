@@ -16,6 +16,7 @@ sealed class Befehl {
     object Update : Befehl()
     object Testtermin : Befehl()
     object NachrichtenLesen : Befehl()
+    object TelefonEinrichten : Befehl()
     data class SmsSchreiben(val rest: String) : Befehl()
     data class Zurueckschreiben(val text: String) : Befehl()
     object Keiner : Befehl()
@@ -64,6 +65,10 @@ object Befehle {
         if (w.any { it in setOf("update", "updates", "apdate", "abdate", "updaten", "upgrade") } ||
             t.contains("aktualisier") || t.contains("neue version") || t.contains("neueste version")
         ) return Befehl.Update
+
+        if (t.contains("telefon") && (t.contains("einricht") || t.contains("app") || t.contains("standard"))) {
+            return Befehl.TelefonEinrichten
+        }
 
         nachrichtenBefehl(t)?.let { return it }
 

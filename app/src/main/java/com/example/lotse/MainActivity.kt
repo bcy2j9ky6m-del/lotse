@@ -214,7 +214,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val sprechen = if (stimmeBereit) "ja" else "NEIN"
         val gehirn = if (netz.serverEingerichtet) "ja" else "NEIN"
         val version = packageManager.getPackageInfo(packageName, 0).versionName
-        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn"
+        val telefon = if (istTelefonApp()) "ja" else "NEIN"
+        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon"
     }
 
     // ---------- Berechtigungen ----------
@@ -361,6 +362,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
             Befehl.Update -> { updateStarten(); return }
             Befehl.NachrichtenLesen -> { nachrichtenVorlesen(); return }
+            Befehl.TelefonEinrichten -> { telefonEinrichten(); return }
             is Befehl.SmsSchreiben -> { smsVorbereiten(befehl.rest); return }
             is Befehl.Zurueckschreiben -> { zurueckschreiben(befehl.text); return }
             Befehl.Testtermin -> {
@@ -617,6 +619,45 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             r.zweck == Zweck.ANRUFEN -> bestaetigeAnruf(k)
             r.text.isBlank() -> diktieren(k)
             else -> bestaetigeSms(k, r.text)
+        }
+    }
+
+    // ---------- Telefon-App werden ----------
+
+    private fun istTelefonApp(): Boolean {
+        val telecom = getSystemService(TELECOM_SERVICE) as android.telecom.TelecomManager
+        return telecom.defaultDialerPackage == packageName
+    }
+
+    @Suppress("DEPRECATION")
+    private fun telefonEinrichten() {
+        if (istTelefonApp()) {
+            antworten("Lotse ist schon die Telefon-App. Anrufe zeige ich mit großen Knöpfen an.")
+            return
+        }
+        val anfrage = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val rollen = getSystemService(android.app.role.RoleManager::class.java)
+            rollen.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+        } else {
+            Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER)
+                .putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
+        }
+        try {
+            startActivityForResult(anfrage, 3)
+        } catch (e: Exception) {
+            technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+            antworten("Ich kann die Telefon-Einstellung gerade nicht öffnen.")
+        }
+    }
+
+    @Deprecated("Für Android 6 bewusst so gelöst")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 3) {
+            aktualisiereDiagnose()
+            if (istTelefonApp()) antworten("Erledigt. Ab jetzt zeige ich Anrufe mit großen Knöpfen an.")
+            else antworten("Lotse ist noch nicht die Telefon-App. Du kannst es jederzeit nochmal versuchen.")
         }
     }
 
