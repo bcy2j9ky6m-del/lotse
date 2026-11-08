@@ -29,7 +29,9 @@ object Updater {
             val nummer = treffer.groupValues[3].toInt()
             if (nummer <= installierteNummer) return null
             val version = "${treffer.groupValues[1]}.${treffer.groupValues[2]}.${treffer.groupValues[3]}"
-            return NeueVersion(version, nummer, d.getString("browser_download_url"), name)
+            // Direkt-Link über den Zweig "downloads" – zuverlässiger als der normale Release-Link
+            val adresse = "https://raw.githubusercontent.com/$PROJEKT/downloads/$name"
+            return NeueVersion(version, nummer, adresse, name)
         }
         return null
     }

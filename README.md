@@ -5,8 +5,9 @@ Ein Android-Handy, das man nur per Sprache bedient – gebaut für Omama.
 ## Aktuelle Testversion installieren
 
 1. Auf dem Testhandy einmalig: *Einstellungen → Sicherheit → Unbekannte Herkunft* einschalten.
-2. Im Browser des Handys öffnen: `https://github.com/bcy2j9ky6m-del/lotse/releases/latest`
-3. Unter *Assets* die Datei `lotse-0.1.<Nummer>.apk` antippen → herunterladen → *Installieren*.
+2. Im Browser des Handys öffnen: `https://raw.githubusercontent.com/bcy2j9ky6m-del/lotse/downloads/lotse-0.1.<Nummer>.apk`
+3. Heruntergeladene Datei antippen → *Installieren*.
+   Ab Version 0.1.15 geht es auch per Sprachbefehl: „Update“.
 4. Kontrolle: Die Versionsnummer steht unten auf dem Ruhebildschirm von Lotse.
 
 Neue Versionen werden nach jeder Änderung automatisch gebaut (Reiter *Actions*, dauert ca. 5 Minuten) und lassen sich über die alte Version installieren.
