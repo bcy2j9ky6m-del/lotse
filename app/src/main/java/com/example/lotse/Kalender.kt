@@ -137,6 +137,33 @@ object Kalender {
         } catch (e: Exception) {
             teile.add("Terminliste nicht lesbar: ${e.javaClass.simpleName}.")
         }
+        // Die zuletzt angelegten Termine – egal für welchen Tag
+        try {
+            var gesamt = 0
+            val zuletzt = mutableListOf<String>()
+            val format = SimpleDateFormat("EEEE d.M.yyyy HH:mm", deutsch)
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Events.TITLE,
+                    CalendarContract.Events.DTSTART,
+                    CalendarContract.Events.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Events.DELETED
+                ),
+                null, null,
+                CalendarContract.Events._ID + " DESC"
+            )?.use { c ->
+                gesamt = c.count
+                while (c.moveToNext() && zuletzt.size < 3) {
+                    val geloescht = if (c.getInt(3) == 1) ", gelöscht" else ""
+                    zuletzt.add("„${c.getString(0)}“ am ${format.format(c.getLong(1))} im Kalender ${c.getString(2)}$geloescht")
+                }
+            }
+            teile.add("Insgesamt sind $gesamt Termine gespeichert.")
+            if (zuletzt.isNotEmpty()) teile.add("Zuletzt angelegt: ${zuletzt.joinToString(". ")}.")
+        } catch (e: Exception) {
+            teile.add("Letzte Termine nicht lesbar: ${e.javaClass.simpleName}.")
+        }
         return teile.joinToString(" ")
     }
 
