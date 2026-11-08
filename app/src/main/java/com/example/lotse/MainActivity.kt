@@ -172,6 +172,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         when (id) {
             "rueckfrage" -> if (zustand == Zustand.RUECKFRAGE) zuhoerenStarten(fuerRueckfrage = true)
             "anruf" -> anrufStarten()
+            // Erst wenn die Antwort fertig vorgelesen ist, läuft die Zeit bis zum Ruhebildschirm
+            "antwort" -> if (zustand == Zustand.ANTWORT) {
+                handler.removeCallbacks(zurueckZurRuhe)
+                handler.postDelayed(zurueckZurRuhe, 15000)
+            }
         }
     }
 
@@ -336,9 +341,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun antworten(text: String) {
         antwortText = text
         zustand = Zustand.ANTWORT
-        sprich(text, "antwort")
         handler.removeCallbacks(zurueckZurRuhe)
-        handler.postDelayed(zurueckZurRuhe, 15000)
+        // Sicherheitsnetz, falls das Ende des Vorlesens nicht gemeldet wird
+        handler.postDelayed(zurueckZurRuhe, 120000)
+        sprich(text, "antwort") // danach startet der 15-Sekunden-Zähler
     }
 
     private fun abbrechen() {
