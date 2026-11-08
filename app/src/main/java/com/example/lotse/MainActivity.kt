@@ -94,6 +94,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var mithoeren by mutableStateOf(false)   // hört während einer Rückfrage zu
     private var mithoerText by mutableStateOf("")
     private var heuteText by mutableStateOf("") // nächster Termin für den Ruhebildschirm
+    private var denkTitel by mutableStateOf("Ich überlege …")
+    private var denkKarte by mutableStateOf("Du hast gesagt:")
+    private var denkText by mutableStateOf("")
+    private var denkZitat by mutableStateOf(true)
 
     private var anrufZiel: Kontakt? = null
     private var nachfragen = 0
@@ -131,8 +135,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     text = erkannterText, onAbbrechen = { abbrechen() }
                 )
                 Zustand.DENKEN -> HoerenBildschirm(
-                    titel = "Ich überlege …", kartenTitel = "Du hast gesagt:",
-                    text = erkannterText, onAbbrechen = { abbrechen() }
+                    titel = denkTitel, kartenTitel = denkKarte,
+                    text = denkText, zitat = denkZitat, onAbbrechen = { abbrechen() }
                 )
                 Zustand.RUECKFRAGE -> rueckfrage?.let { r ->
                     RueckfrageBildschirm(
@@ -367,7 +371,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             antworten("Du hast gesagt: $satz")
             return
         }
-        zustand = Zustand.DENKEN
+        zeigeDenken("Ich überlege …", "Du hast gesagt:", satz, zitat = true)
         val jetzt = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm 'Uhr'", Locale.GERMANY).format(Date())
         Thread {
             val antwort = try {
@@ -382,64 +386,53 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     // ---------- Selbst aktualisieren ----------
 
-    private var downloadId = -1L
-
-    private val downloadBeobachten = object : Runnable {
-        override fun run() {
-            if (downloadId < 0) return
-            val stand = Updater.stand(this@MainActivity, downloadId)
-            when {
-                stand == "läuft" -> handler.postDelayed(this, 1000)
-                stand == "fertig" -> {
-                    val id = downloadId
-                    downloadId = -1
-                    try {
-                        antworten("Fertig geladen. Tippe gleich auf Installieren. Danach startet Lotse neu.")
-                        handler.postDelayed({ Updater.installiere(this@MainActivity, id) }, 4000)
-                    } catch (e: Exception) {
-                        technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
-                        antworten("Die neue Version ist geladen, aber ich kann die Installation nicht öffnen.")
-                    }
-                }
-                else -> {
-                    downloadId = -1
-                    technik = "Download $stand"
-                    antworten("Das Herunterladen hat nicht geklappt. Versuch es später nochmal.")
-                }
-            }
-        }
-    }
-
     @Suppress("DEPRECATION")
     private fun installierteNummer(): Int = packageManager.getPackageInfo(packageName, 0).versionCode
 
     private fun updateStarten() {
         technik = ""
-        zustand = Zustand.DENKEN
+        val installiert = packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        zeigeDenken("Ich suche nach einer neuen Version …", "Installiert ist:", "Version $installiert", zitat = false)
         Thread {
-            val ergebnis: () -> Unit = try {
+            try {
                 val neu = Updater.suche(netz, installierteNummer())
                 if (neu == null) {
-                    val version = packageManager.getPackageInfo(packageName, 0).versionName
-                    ({ antworten("Ich bin schon auf dem neuesten Stand. Version $version.") })
-                } else {
-                    ({
-                        downloadId = Updater.ladeHerunter(this, neu)
-                        antworten("Es gibt eine neue Version: ${neu.version}. Ich lade sie jetzt herunter. Das dauert einen Moment.")
-                        handler.postDelayed(downloadBeobachten, 1000)
-                    })
+                    runOnUiThread { antworten("Ich bin schon auf dem neuesten Stand. Version $installiert.") }
+                    return@Thread
+                }
+                runOnUiThread {
+                    zeigeDenken("Ich lade Version ${neu.version} …", "Fortschritt:", "0 %", zitat = false)
+                    sprich("Es gibt eine neue Version. Ich lade sie jetzt herunter.", "info")
+                }
+                val datei = Updater.ladeHerunter(this, netz, neu) { prozent ->
+                    runOnUiThread { if (zustand == Zustand.DENKEN) denkText = "$prozent %" }
+                }
+                runOnUiThread {
+                    antworten("Fertig geladen. Tippe gleich auf Installieren. Danach öffne Lotse wieder.")
+                    handler.postDelayed({
+                        try {
+                            Updater.installiere(this, datei)
+                        } catch (e: Exception) {
+                            technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                            antworten("Die neue Version ist geladen, aber ich kann die Installation nicht öffnen.")
+                        }
+                    }, 5000)
                 }
             } catch (e: Exception) {
-                technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
-                ({ antworten("Ich kann gerade nicht nach neuen Versionen suchen.") })
-            }
-            runOnUiThread {
-                try { ergebnis() } catch (e: Exception) {
+                runOnUiThread {
                     technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
-                    antworten("Das Herunterladen konnte nicht starten.")
+                    antworten("Das Update hat nicht geklappt. Versuch es später nochmal.")
                 }
             }
         }.start()
+    }
+
+    private fun zeigeDenken(titel: String, karte: String, text: String, zitat: Boolean) {
+        denkTitel = titel
+        denkKarte = karte
+        denkText = text
+        denkZitat = zitat
+        zustand = Zustand.DENKEN
     }
 
     // ---------- Kalender ----------
@@ -689,7 +682,7 @@ fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
 }
 
 @Composable
-fun HoerenBildschirm(titel: String, kartenTitel: String, text: String, onAbbrechen: () -> Unit) {
+fun HoerenBildschirm(titel: String, kartenTitel: String, text: String, zitat: Boolean = true, onAbbrechen: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().background(Hintergrund).padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -704,7 +697,12 @@ fun HoerenBildschirm(titel: String, kartenTitel: String, text: String, onAbbrech
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Karte {
                 Text(kartenTitel, fontSize = 20.sp, color = Grau)
-                Text(if (text.isBlank()) "…" else "„$text“", fontSize = 28.sp, lineHeight = 34.sp, color = Schrift)
+                val anzeige = when {
+                    text.isBlank() -> "…"
+                    zitat -> "„$text“"
+                    else -> text
+                }
+                Text(anzeige, fontSize = 28.sp, lineHeight = 34.sp, color = Schrift)
             }
         }
         UmrandeterKnopf("Abbrechen", hoehe = 88.dp, onClick = onAbbrechen)

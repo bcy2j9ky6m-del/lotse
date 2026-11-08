@@ -1,13 +1,14 @@
 package com.example.lotse
 
 // Lotse aktualisiert sich auf Zuruf selbst: neueste Version bei GitHub suchen,
-// herunterladen und die Installation öffnen. Die Installation bestätigt immer ein Mensch.
+// selbst herunterladen und die Installation öffnen. Die Installation bestätigt immer ein Mensch.
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
 
@@ -23,8 +24,7 @@ object Updater {
         val antwort = JSONObject(netz.hole("https://api.github.com/repos/$PROJEKT/releases/latest"))
         val dateien = antwort.getJSONArray("assets")
         for (i in 0 until dateien.length()) {
-            val d = dateien.getJSONObject(i)
-            val name = d.getString("name")
+            val name = dateien.getJSONObject(i).getString("name")
             val treffer = dateiMuster.matchEntire(name) ?: continue
             val nummer = treffer.groupValues[3].toInt()
             if (nummer <= installierteNummer) return null
@@ -36,41 +36,25 @@ object Updater {
         return null
     }
 
-    // Startet den Download über den Download-Manager von Android. Gibt die Download-Nummer zurück.
-    fun ladeHerunter(context: Context, neu: NeueVersion): Long {
+    // Lädt die Datei selbst herunter (ohne den Download-Manager von Android) und meldet den Fortschritt
+    fun ladeHerunter(context: Context, netz: Netz, neu: NeueVersion, fortschritt: (Int) -> Unit): File {
         val ordner = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-        File(ordner, neu.datei).delete() // alte Datei gleichen Namens entfernen
-        val auftrag = DownloadManager.Request(Uri.parse(neu.adresse))
-            .setTitle("Lotse ${neu.version}")
-            .setDescription("Neue Version wird geladen")
-            .setMimeType("application/vnd.android.package-archive")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, neu.datei)
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return manager.enqueue(auftrag)
-    }
-
-    // Zustand eines Downloads: "läuft", "fertig" oder "fehler:<Grund>"
-    fun stand(context: Context, id: Long): String {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        manager.query(DownloadManager.Query().setFilterById(id))?.use { c ->
-            if (!c.moveToFirst()) return "fehler:verschwunden"
-            val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            return when (status) {
-                DownloadManager.STATUS_SUCCESSFUL -> "fertig"
-                DownloadManager.STATUS_FAILED -> "fehler:" + c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
-                else -> "läuft"
-            }
-        }
-        return "fehler:unbekannt"
+            ?: throw IllegalStateException("Kein Speicherplatz für den Download")
+        ordner.listFiles()?.filter { it.name.endsWith(".apk") }?.forEach { it.delete() } // alte Dateien weg
+        val ziel = File(ordner, neu.datei)
+        netz.ladeDatei(neu.adresse, ziel, fortschritt)
+        return ziel
     }
 
     // Öffnet die Installation – Android fragt dann "Installieren?"
-    fun installiere(context: Context, id: Long) {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val datei = manager.getUriForDownloadedFile(id) ?: throw IllegalStateException("Datei nicht gefunden")
+    fun installiere(context: Context, datei: File) {
+        val adresse: Uri = if (Build.VERSION.SDK_INT >= 24) {
+            FileProvider.getUriForFile(context, context.packageName + ".dateien", datei)
+        } else {
+            Uri.fromFile(datei) // Android 6 und älter kennen nur Dateipfade
+        }
         val installation = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(datei, "application/vnd.android.package-archive")
+            .setDataAndType(adresse, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(installation)
     }

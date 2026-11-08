@@ -6,6 +6,9 @@ package com.example.lotse
 
 import android.content.Context
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.KeyStore
@@ -69,6 +72,41 @@ class Netz(private val context: Context) {
             val code = verbindung.responseCode
             if (code !in 200..299) throw IllegalStateException("Antwort $code")
             return verbindung.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } finally {
+            verbindung.disconnect()
+        }
+    }
+
+    // Datei herunterladen und speichern; meldet den Fortschritt in Prozent
+    fun ladeDatei(adresse: String, ziel: File, fortschritt: (Int) -> Unit) {
+        val verbindung = URL(adresse).openConnection() as HttpURLConnection
+        if (verbindung is HttpsURLConnection) verbindung.sslSocketFactory = sslFabrik
+        try {
+            verbindung.connectTimeout = 15_000
+            verbindung.readTimeout = 30_000
+            verbindung.instanceFollowRedirects = true
+            verbindung.setRequestProperty("User-Agent", "Lotse-App")
+            val code = verbindung.responseCode
+            if (code !in 200..299) throw IOException("Download-Antwort $code")
+            val gesamt = verbindung.contentLength.toLong()
+            var geladen = 0L
+            var letzterStand = -1
+            verbindung.inputStream.use { ein ->
+                FileOutputStream(ziel).use { aus ->
+                    val puffer = ByteArray(32 * 1024)
+                    while (true) {
+                        val n = ein.read(puffer)
+                        if (n < 0) break
+                        aus.write(puffer, 0, n)
+                        geladen += n
+                        if (gesamt > 0) {
+                            val stand = (geladen * 100 / gesamt).toInt()
+                            if (stand != letzterStand) { letzterStand = stand; fortschritt(stand) }
+                        }
+                    }
+                }
+            }
+            if (gesamt > 0 && geladen != gesamt) throw IOException("Download unvollständig ($geladen von $gesamt)")
         } finally {
             verbindung.disconnect()
         }

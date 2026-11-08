@@ -42,6 +42,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Gibt heruntergeladene Updates für die Installation frei (ab Android 7 nötig) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.dateien"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/dateien" />
+        </provider>
+
     </application>
 
 </manifest>
