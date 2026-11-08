@@ -17,6 +17,9 @@ sealed class Befehl {
     object Testtermin : Befehl()
     object NachrichtenLesen : Befehl()
     object TelefonEinrichten : Befehl()
+    object Notfall : Befehl()
+    data class NotfallkontaktSetzen(val name: String) : Befehl()
+    object NotfallkontaktAbfragen : Befehl()
     data class SmsSchreiben(val rest: String) : Befehl()
     data class Zurueckschreiben(val text: String) : Befehl()
     object Keiner : Befehl()
@@ -54,8 +57,23 @@ object Befehle {
         Regex("""^(.+?)\s+anrufen\b""")
     )
 
+    private val notfallWoerter = setOf("hilfe", "notruf", "notfall", "gestürzt", "hingefallen", "krankenwagen", "rettungswagen")
+    private val notfallSaetze = listOf("bin gefallen", "komme nicht hoch", "komm nicht hoch", "kann nicht aufstehen", "einen arzt", "geht mir schlecht", "geht es mir schlecht")
+
     fun erkenne(satz: String): Befehl {
         val t = einfach(satz)
+        val woerterNotfall = t.split(" ")
+
+        // Notfallkontakt festlegen oder abfragen
+        if (t.contains("notfallkontakt") || t.contains("notfall kontakt")) {
+            if (t.contains("wer ") || t.contains("welche")) return Befehl.NotfallkontaktAbfragen
+            val name = t.substringAfter("kontakt")
+                .replace(Regex("""\b(?:ist|festlegen|setzen|einrichten|auf|soll|sein|werden|wird|neu)\b"""), " ")
+            return Befehl.NotfallkontaktSetzen(normalisiere(name))
+        }
+
+        // Notfall hat immer Vorrang vor allem anderen
+        if (woerterNotfall.any { it in notfallWoerter } || notfallSaetze.any { t.contains(it) }) return Befehl.Notfall
 
         if ((t.contains("wer hat") && t.contains("angerufen")) ||
             t.contains("verpasste anrufe") || t.contains("letzte anrufe") || t.contains("letzten anrufe")
