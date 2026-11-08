@@ -91,13 +91,16 @@ object Anrufe {
         }
     }
 
-    fun annehmen() { anruf?.answer(VideoProfile.STATE_AUDIO_ONLY) }
-    fun ablehnen() { anruf?.reject(false, null) }
-    fun auflegen() { anruf?.disconnect() }
+    // Jede Aktion abgesichert: Ein Fehler darf nie die App und damit das Gespräch beenden
+    fun annehmen() { try { anruf?.answer(VideoProfile.STATE_AUDIO_ONLY) } catch (_: Exception) {} }
+    fun ablehnen() { try { anruf?.reject(false, null) } catch (_: Exception) {} }
+    fun auflegen() { try { anruf?.disconnect() } catch (_: Exception) {} }
 
     fun lautsprecherUmschalten() {
         val d = dienst ?: return
-        d.setAudioRoute(if (lautsprecher) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)
+        try {
+            d.setAudioRoute(if (lautsprecher) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)
+        } catch (_: Exception) {}
     }
 }
 
@@ -147,9 +150,13 @@ class AnrufActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         )
         stimme = TextToSpeech(this, this)
 
-        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
-            naeherung = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "lotse:anruf")
+        try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                naeherung = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "lotse:anruf")
+            }
+        } catch (_: Exception) {
+            naeherung = null
         }
 
         setContent {
@@ -157,8 +164,12 @@ class AnrufActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             // Am Ohr: Bildschirm aus, damit die Wange nichts drückt (nicht bei Lautsprecher)
             LaunchedEffect(z, Anrufe.lautsprecher) {
                 val wl = naeherung ?: return@LaunchedEffect
-                if (z == Call.STATE_ACTIVE && !Anrufe.lautsprecher) { if (!wl.isHeld) wl.acquire(60 * 60 * 1000L) }
-                else if (wl.isHeld) wl.release()
+                try {
+                    if (z == Call.STATE_ACTIVE && !Anrufe.lautsprecher) { if (!wl.isHeld) wl.acquire(60 * 60 * 1000L) }
+                    else if (wl.isHeld) wl.release()
+                } catch (_: Exception) {
+                    // Ohne Näherungssensor geht das Gespräch trotzdem weiter
+                }
             }
             LaunchedEffect(z) {
                 if (z == Call.STATE_DISCONNECTED) { delay(1500); finish() }
@@ -191,7 +202,7 @@ class AnrufActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        naeherung?.let { if (it.isHeld) it.release() }
+        try { naeherung?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
         stimme?.shutdown()
         super.onDestroy()
     }
