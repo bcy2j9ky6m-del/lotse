@@ -87,6 +87,64 @@ object Kalender {
         return liste.sortedWith(compareBy({ !it.ganztags }, { it.beginn }))
     }
 
+    // Einen Kalender finden, in den Lotse schreiben darf – sonst einen eigenen "Lotse"-Kalender anlegen
+    private fun beschreibbarerKalender(context: Context): Long {
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.ACCOUNT_TYPE),
+            "${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ? AND ${CalendarContract.Calendars.VISIBLE} = 1",
+            arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString()),
+            null
+        )?.use { c ->
+            var ersatz = -1L
+            while (c.moveToNext()) {
+                val typ = c.getString(1) ?: ""
+                // Bevorzugt einen Google-Kalender oder einen lokalen Kalender
+                if (typ == "com.google" || typ == CalendarContract.ACCOUNT_TYPE_LOCAL) return c.getLong(0)
+                if (ersatz < 0) ersatz = c.getLong(0)
+            }
+            if (ersatz >= 0) return ersatz
+        }
+
+        val adresse = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, "Lotse")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
+            .build()
+        val werte = android.content.ContentValues().apply {
+            put(CalendarContract.Calendars.ACCOUNT_NAME, "Lotse")
+            put(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
+            put(CalendarContract.Calendars.NAME, "Lotse")
+            put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, "Lotse")
+            put(CalendarContract.Calendars.CALENDAR_COLOR, 0xFF1F4E8C.toInt())
+            put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
+            put(CalendarContract.Calendars.OWNER_ACCOUNT, "Lotse")
+            put(CalendarContract.Calendars.VISIBLE, 1)
+            put(CalendarContract.Calendars.SYNC_EVENTS, 1)
+            put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, TimeZone.getDefault().id)
+        }
+        val neu = context.contentResolver.insert(adresse, werte) ?: throw IllegalStateException("Kalender nicht angelegt")
+        return ContentUris.parseId(neu)
+    }
+
+    // Testtermin in einer Stunde anlegen, 30 Minuten lang
+    fun testterminAnlegen(context: Context): String {
+        val kalenderId = beschreibbarerKalender(context)
+        val beginn = Calendar.getInstance().apply {
+            add(Calendar.HOUR_OF_DAY, 1); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val werte = android.content.ContentValues().apply {
+            put(CalendarContract.Events.CALENDAR_ID, kalenderId)
+            put(CalendarContract.Events.TITLE, "Lotse-Test")
+            put(CalendarContract.Events.DTSTART, beginn)
+            put(CalendarContract.Events.DTEND, beginn + 30 * 60 * 1000)
+            put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+        }
+        context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, werte)
+            ?: throw IllegalStateException("Termin nicht angelegt")
+        return "Ich habe einen Testtermin eingetragen: ${tagGesprochen(beginn)} um ${uhrzeit(beginn)}, Lotse-Test."
+    }
+
     // Für Tests: Was sieht Lotse im Kalender-Speicher des Handys?
     fun pruefung(context: Context): String {
         val teile = mutableListOf<String>()

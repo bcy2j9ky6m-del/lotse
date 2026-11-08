@@ -226,6 +226,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         aktualisiereHeute()
+        if (requestCode == 2) return // nur die Kalender-Schreiberlaubnis, kein Zuhören starten
         if (erlaubt(Manifest.permission.RECORD_AUDIO)) {
             zuhoerenStarten()
         } else {
@@ -335,6 +336,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 kalenderAntwort(befehl); return
             }
             Befehl.Update -> { updateStarten(); return }
+            Befehl.Testtermin -> {
+                if (!erlaubt(Manifest.permission.WRITE_CALENDAR)) {
+                    requestPermissions(arrayOf(Manifest.permission.WRITE_CALENDAR), 2)
+                    antworten("Bitte erlaube mir, in den Kalender zu schreiben. Dann sag nochmal: Testtermin.")
+                    return
+                }
+                val text = try { Kalender.testterminAnlegen(this) } catch (e: Exception) {
+                    technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+                    "Ich konnte keinen Testtermin eintragen."
+                }
+                aktualisiereHeute()
+                antworten(text)
+                return
+            }
             Befehl.TerminEintragen -> {
                 antworten("Termine eintragen kann ich noch nicht. Das macht Bafti für dich. Ich kann dir aber sagen, was du vorhast.")
                 return

@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Kalender lesen -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Nötig ab Android 11, damit Lotse Spracherkennung und Stimme findet -->

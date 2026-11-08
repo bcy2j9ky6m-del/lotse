@@ -14,6 +14,7 @@ sealed class Befehl {
     object Morgengruss : Befehl()
     object KalenderPruefen : Befehl()
     object Update : Befehl()
+    object Testtermin : Befehl()
     object Keiner : Befehl()
 }
 
@@ -81,6 +82,7 @@ object Befehle {
         val woerter = t.split(" ")
 
         if (t.startsWith("guten morgen")) return Befehl.Morgengruss
+        if (t.contains("testtermin") || t.contains("test termin")) return Befehl.Testtermin
         if ((t.contains("kalender") && (t.contains("prüf") || t.contains("test") || t.contains("check"))) ||
             t.contains("kalendertest")
         ) return Befehl.KalenderPruefen
