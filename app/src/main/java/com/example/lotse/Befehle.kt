@@ -7,6 +7,11 @@ import java.util.Locale
 sealed class Befehl {
     data class Anrufen(val name: String) : Befehl()
     object WerHatAngerufen : Befehl()
+    data class TermineAmTag(val versatzTage: Int, val bezeichnung: String) : Befehl()
+    data class TermineMehrereTage(val tage: Int) : Befehl()
+    data class WannIst(val suchwort: String) : Befehl()
+    object TerminEintragen : Befehl()
+    object Morgengruss : Befehl()
     object Keiner : Befehl()
 }
 
@@ -49,12 +54,63 @@ object Befehle {
             t.contains("verpasste anrufe") || t.contains("letzte anrufe") || t.contains("letzten anrufe")
         ) return Befehl.WerHatAngerufen
 
+        kalenderBefehl(t)?.let { return it }
+
         for (muster in anrufMuster) {
             val treffer = muster.find(t) ?: continue
             val name = normalisiere(treffer.groupValues[1])
             if (name.isNotBlank()) return Befehl.Anrufen(name)
         }
         return Befehl.Keiner
+    }
+
+    private val wochentage = listOf("sonntag", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag")
+
+    private val wannMuster = Regex(
+        """^wann\s+(?:kommt|kommen|ist|sind|habe ich|hab ich|muss ich|geht|gehe ich|fängt|beginnt|sehe ich|besucht mich|treffe ich|war)\s+(.+)$"""
+    )
+
+    private fun kalenderBefehl(t: String): Befehl? {
+        val woerter = t.split(" ")
+
+        if (t.startsWith("guten morgen")) return Befehl.Morgengruss
+
+        if ((t.contains("trag") && t.contains("ein")) || t.contains("termin eintragen") ||
+            t.contains("termin machen") || t.contains("neuen termin")
+        ) return Befehl.TerminEintragen
+
+        // Fragen nach dem Datum beantwortet lokaleAntwort, nicht der Kalender
+        if (t.contains("welcher tag") || t.contains("für ein tag") || t.contains("datum") || t.contains("wievielte")) return null
+
+        wannMuster.find(t)?.let { treffer ->
+            val suchwort = treffer.groupValues[1]
+                .replace(Regex("""\b(?:an|los|vorbei|zu mir|zu besuch|wieder|denn|eigentlich)\b"""), " ")
+            val wort = normalisiere(suchwort)
+            return Befehl.WannIst(if (wort.contains("termin")) "" else wort)
+        }
+        if (t.contains("nächste termin") || t.contains("nächster termin") || t.contains("nächsten termin")) {
+            return Befehl.WannIst("")
+        }
+
+        val kalenderFrage = listOf("vor", "termin", "termine", "was ist", "was steht", "was gibt", "los", "geplant", "programm", "plan")
+            .any { if (it.contains(" ")) t.contains(it) else woerter.contains(it) || woerter.any { w -> w.startsWith(it) && it.length > 4 } }
+        if (!kalenderFrage) return null
+
+        if (t.contains("woche") || t.contains("nächsten tage")) return Befehl.TermineMehrereTage(7)
+        if (woerter.contains("übermorgen")) return Befehl.TermineAmTag(2, "übermorgen")
+        if (woerter.contains("morgen")) return Befehl.TermineAmTag(1, "morgen")
+        if (woerter.contains("heute")) return Befehl.TermineAmTag(0, "heute")
+
+        val tag = wochentage.indexOfFirst { woerter.contains(it) }
+        if (tag >= 0) {
+            val heute = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0 = Sonntag
+            val versatz = (tag - heute + 7) % 7
+            val name = wochentage[tag].replaceFirstChar { it.uppercase(Locale.GERMANY) }
+            return Befehl.TermineAmTag(versatz, if (versatz == 0) "heute" else "am $name")
+        }
+        // "Was habe ich vor?" ohne Tag → heute
+        if (t.contains("habe ich") || t.contains("hab ich") || woerter.contains("termine")) return Befehl.TermineAmTag(0, "heute")
+        return null
     }
 
     fun istNein(antwort: String): Boolean {

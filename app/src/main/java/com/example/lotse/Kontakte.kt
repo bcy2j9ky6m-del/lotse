@@ -51,7 +51,7 @@ object Kontakte {
         return gesucht.split(" ").all { wort -> namensWoerter.any { aehnlich(it, wort) } }
     }
 
-    private fun aehnlich(a: String, b: String): Boolean {
+    fun aehnlich(a: String, b: String): Boolean {
         if (a == b) return true
         if (b.length >= 3 && a.startsWith(b)) return true
         if (a.length >= 4 && b.length >= 4 && abstand(a, b) <= 1) return true

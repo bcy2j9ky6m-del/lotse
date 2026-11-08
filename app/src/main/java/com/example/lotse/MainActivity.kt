@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var rueckfrage by mutableStateOf<Rueckfrage?>(null)
     private var mithoeren by mutableStateOf(false)   // hört während einer Rückfrage zu
     private var mithoerText by mutableStateOf("")
+    private var heuteText by mutableStateOf("") // nächster Termin für den Ruhebildschirm
 
     private var anrufZiel: Kontakt? = null
     private var nachfragen = 0
@@ -105,6 +106,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val handler = Handler(Looper.getMainLooper())
     private val zurueckZurRuhe = Runnable { abbrechen() }
 
+    // Alle 30 Sekunden: Termin-Anzeige aktualisieren und prüfen, ob der Morgengruß fällig ist
+    private val regelmaessig = object : Runnable {
+        override fun run() {
+            aktualisiereHeute()
+            pruefeMorgengruss()
+            handler.postDelayed(this, 30_000)
+        }
+    }
+
+    private val einstellungen by lazy { getSharedPreferences("lotse", MODE_PRIVATE) }
+    private val morgengrussAb = 9 // Uhr
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -112,7 +125,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
         setContent {
             when (zustand) {
-                Zustand.RUHE -> Ruhebildschirm(diagnose = diagnose, onTaste = { tasteGedrueckt() })
+                Zustand.RUHE -> Ruhebildschirm(diagnose = diagnose, heute = heuteText, onTaste = { tasteGedrueckt() })
                 Zustand.HOEREN -> HoerenBildschirm(
                     titel = "Ich höre zu …", kartenTitel = "Du sagst:",
                     text = erkannterText, onAbbrechen = { abbrechen() }
@@ -196,7 +209,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.CALL_PHONE,
-        Manifest.permission.READ_CALL_LOG
+        Manifest.permission.READ_CALL_LOG,
+        Manifest.permission.READ_CALENDAR
     )
 
     private fun tasteGedrueckt() {
@@ -211,6 +225,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     @Deprecated("Für Android 6 bewusst so gelöst")
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        aktualisiereHeute()
         if (erlaubt(Manifest.permission.RECORD_AUDIO)) {
             zuhoerenStarten()
         } else {
@@ -315,6 +330,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 else antworten("Ich darf die Anrufliste nicht lesen. Bitte erlaube es in den Einstellungen.")
                 return
             }
+            is Befehl.TermineAmTag, is Befehl.TermineMehrereTage, is Befehl.WannIst, Befehl.Morgengruss -> {
+                kalenderAntwort(befehl); return
+            }
+            Befehl.TerminEintragen -> {
+                antworten("Termine eintragen kann ich noch nicht. Das macht Bafti für dich. Ich kann dir aber sagen, was du vorhast.")
+                return
+            }
             Befehl.Keiner -> {}
         }
 
@@ -335,6 +357,65 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
             runOnUiThread { if (zustand == Zustand.DENKEN) antworten(antwort) }
         }.start()
+    }
+
+    // ---------- Kalender ----------
+
+    private fun kalenderAntwort(befehl: Befehl) {
+        if (!erlaubt(Manifest.permission.READ_CALENDAR)) {
+            antworten("Ich darf den Kalender nicht lesen. Bitte erlaube es in den Einstellungen.")
+            return
+        }
+        val text = try {
+            when (befehl) {
+                is Befehl.TermineAmTag -> Kalender.tagesUebersicht(this, befehl.versatzTage, befehl.bezeichnung)
+                is Befehl.TermineMehrereTage -> Kalender.mehrereTage(this, befehl.tage)
+                is Befehl.WannIst -> {
+                    val gefunden = Kalender.suche(this, befehl.suchwort)
+                    when {
+                        gefunden != null -> Kalender.gefundenText(gefunden)
+                        befehl.suchwort.isBlank() -> "In den nächsten Wochen hast du keine Termine."
+                        else -> "Dazu habe ich in den nächsten Wochen keinen Termin gefunden."
+                    }
+                }
+                Befehl.Morgengruss -> morgengrussText()
+                else -> "Dazu habe ich nichts gefunden."
+            }
+        } catch (e: Exception) {
+            technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
+            "Ich kann den Kalender gerade nicht lesen."
+        }
+        antworten(text)
+    }
+
+    private fun morgengrussText(): String {
+        val stunde = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val gruss = when (stunde) {
+            in 5..10 -> "Guten Morgen."
+            in 11..17 -> "Hallo."
+            else -> "Guten Abend."
+        }
+        val datum = SimpleDateFormat("EEEE, 'der' d. MMMM", Locale.GERMANY).format(Date())
+        val termine = if (erlaubt(Manifest.permission.READ_CALENDAR)) " " + Kalender.tagesUebersicht(this, 0, "heute") else ""
+        return "$gruss Heute ist $datum.$termine"
+    }
+
+    private fun aktualisiereHeute() {
+        heuteText = if (erlaubt(Manifest.permission.READ_CALENDAR)) {
+            try { Kalender.naechsterHeute(this) } catch (_: Exception) { "" }
+        } else ""
+    }
+
+    // Einmal am Tag ab 9 Uhr begrüßt Lotse von selbst – nur wenn gerade nichts anderes läuft
+    private fun pruefeMorgengruss() {
+        if (zustand != Zustand.RUHE) return
+        val stunde = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        if (stunde < morgengrussAb || stunde >= 12) return
+        val heute = SimpleDateFormat("yyyyMMdd", Locale.GERMANY).format(Date())
+        if (einstellungen.getString("morgengruss", "") == heute) return
+        einstellungen.edit().putString("morgengruss", heute).apply()
+        technik = ""
+        antworten(morgengrussText())
     }
 
     // Antwort anzeigen und vorlesen, nach 15 Sekunden zurück zum Ruhebildschirm
@@ -454,10 +535,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         aktualisiereDiagnose()
+        handler.removeCallbacks(regelmaessig)
+        handler.postDelayed(regelmaessig, 2_000) // kurz warten, bis die Stimme bereit ist
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(regelmaessig)
+        super.onPause()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(zurueckZurRuhe)
+        handler.removeCallbacks(regelmaessig)
         erkenner?.destroy()
         stimme?.shutdown()
         super.onDestroy()
@@ -467,7 +556,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 // ---------- Bildschirme ----------
 
 @Composable
-fun Ruhebildschirm(diagnose: String, onTaste: () -> Unit) {
+fun Ruhebildschirm(diagnose: String, heute: String, onTaste: () -> Unit) {
     var jetzt by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -491,7 +580,14 @@ fun Ruhebildschirm(diagnose: String, onTaste: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text(uhrzeit, fontSize = 92.sp, lineHeight = 96.sp, fontWeight = FontWeight.Bold, color = Schrift)
         Text(tageszeit(stunde), fontSize = 26.sp, color = Grau)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
+        if (heute.isNotBlank()) {
+            Karte {
+                Text("Heute", fontSize = 18.sp, color = Grau)
+                Text(heute, fontSize = 26.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 2)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
         Button(
             onClick = onTaste,
             modifier = Modifier.fillMaxWidth().weight(1f),
