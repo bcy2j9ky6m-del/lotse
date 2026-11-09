@@ -211,12 +211,45 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         aktualisiereDiagnose()
     }
 
+    private var sprechNummer = 0 // erkennt veraltete Rückmeldungen, wenn inzwischen etwas Neues gesagt wird
+
     private fun sprich(text: String, id: String) {
+        stoppeSprechen()
+        val nummer = ++sprechNummer
+        if (KiStimme.aktiv(this) && netz.serverEingerichtet) {
+            // Natürliche KI-Stimme versuchen, sonst Handy-Stimme
+            val stimmeName = KiStimme.name(this)
+            val tempo = Stimme.tempo(this)
+            Thread {
+                val ok = try {
+                    val (pcm, rate) = netz.sprachAudio(text, stimmeName)
+                    if (nummer != sprechNummer) return@Thread
+                    KiStimme.abspielen(pcm, rate, tempo)
+                } catch (_: Exception) {
+                    false
+                }
+                runOnUiThread {
+                    if (nummer != sprechNummer) return@runOnUiThread
+                    if (ok) nachDemSprechen(id) else handyStimme(text, id)
+                }
+            }.start()
+        } else {
+            handyStimme(text, id)
+        }
+    }
+
+    private fun handyStimme(text: String, id: String) {
         if (stimmeBereit) {
             stimme?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
         } else {
             nachDemSprechen(id)
         }
+    }
+
+    private fun stoppeSprechen() {
+        sprechNummer++
+        KiStimme.stoppen()
+        stimme?.stop()
     }
 
     // Was passieren soll, wenn ein Satz zu Ende gesprochen ist
@@ -291,7 +324,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             rueckfrage = null
             anrufZiel = null
         }
-        stimme?.stop()
+        stoppeSprechen()
 
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             if (!fuerRueckfrage) antworten("Auf diesem Handy fehlt die Spracherkennung.")
@@ -405,7 +438,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 antworten(if (anzahl > 0) "Gut, das habe ich vergessen." else "Dazu hatte ich mir nichts gemerkt.")
                 return
             }
+            Befehl.KiStimmeAn -> {
+                KiStimme.setzeAktiv(this, true)
+                antworten("Gut, ich spreche jetzt mit meiner natürlichen Stimme. Ohne Internet nehme ich die Handy-Stimme.")
+                return
+            }
+            Befehl.KiStimmeAus -> {
+                KiStimme.setzeAktiv(this, false)
+                antworten("Gut, ich spreche jetzt mit der Handy-Stimme. Die geht auch ohne Internet.")
+                return
+            }
             Befehl.StimmeWechseln -> {
+                if (KiStimme.aktiv(this) && netz.serverEingerichtet) {
+                    val (nr, anz) = KiStimme.naechste(this)
+                    antworten("So klinge ich jetzt. Das ist Stimme $nr von $anz. Sag nochmal: Andere Stimme, um weiterzuschalten.")
+                    return
+                }
                 val tts = stimme
                 val (nummer, anzahl) = if (tts != null) Stimme.naechste(this, tts) else (0 to 0)
                 antworten(
@@ -600,7 +648,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun abbrechen() {
         handler.removeCallbacks(zurueckZurRuhe)
         erkenner?.cancel()
-        stimme?.stop()
+        stoppeSprechen()
         rueckfrage = null
         anrufZiel = null
         mithoeren = false
@@ -900,7 +948,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     // Versteckter Zugang für Pflege und Familie: 7× schnell auf den Wochentag tippen
     private fun pflegeOeffnen() {
         handler.removeCallbacks(zurueckZurRuhe)
-        stimme?.stop()
+        stoppeSprechen()
         zustand = Zustand.PFLEGE
         handler.postDelayed(zurueckZurRuhe, 120_000) // nach 2 Minuten automatisch zurück
     }

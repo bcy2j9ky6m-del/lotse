@@ -5,8 +5,10 @@
 // Benötigte Geheimnisse (Cloudflare → Worker → Settings → Variables and Secrets):
 //   GEMINI_KEY  – API-Schlüssel aus Google AI Studio
 //   LOTSE_TOKEN – Passwort, das nur die Lotse-App kennt
-// Optional (normale Variable):
+// Optional (normale Variablen):
 //   MODELL      – z. B. "gemini-flash-lite-latest" (Standard) oder "gemini-flash-latest"
+//   TTS_MODELL  – Sprachmodell für die Stimme, Standard "gemini-2.5-flash-preview-tts"
+//   STIMME      – Standardstimme, z. B. "Sulafat"
 
 const ANWEISUNG = `Du bist „Lotse“, die Stimme eines einfachen Sprach-Handys für eine ältere Dame in Bremen.
 Alles, was du schreibst, wird laut vorgelesen.
@@ -39,12 +41,17 @@ export default {
       return text("Lotse-Server läuft.");
     }
 
-    if (request.method !== "POST" || url.pathname !== "/frage") {
+    if (request.method !== "POST" || (url.pathname !== "/frage" && url.pathname !== "/sprich")) {
       return json({ fehler: "unbekannt" }, 404);
     }
 
     if (!env.LOTSE_TOKEN || request.headers.get("X-Lotse-Token") !== env.LOTSE_TOKEN) {
       return json({ fehler: "nicht erlaubt" }, 401);
+    }
+
+    // Natürliche KI-Stimme: Text → Audio (PCM 16 Bit, mono)
+    if (url.pathname === "/sprich") {
+      return sprich(request, env);
     }
 
     let eingabe;
@@ -121,6 +128,62 @@ export default {
     }
   },
 };
+
+// Erlaubte Gemini-Stimmen (Lotse kann per "Andere Stimme" durchschalten)
+const STIMMEN = ["Sulafat", "Achird", "Kore", "Aoede", "Charon", "Puck"];
+
+async function sprich(request, env) {
+  let eingabe;
+  try {
+    eingabe = await request.json();
+  } catch {
+    return json({ fehler: "ungültige Anfrage" }, 400);
+  }
+  const text = String(eingabe.text || "").slice(0, 1200);
+  if (!text) return json({ fehler: "kein Text" }, 400);
+  const stimme = STIMMEN.includes(eingabe.stimme) ? eingabe.stimme : (env.STIMME || "Sulafat");
+  const modell = env.TTS_MODELL || "gemini-2.5-flash-preview-tts";
+
+  const anfrage = {
+    contents: [{ parts: [{ text: `Sprich ruhig, warm und deutlich, etwas langsam: ${text}` }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: stimme } } },
+    },
+  };
+
+  try {
+    const antwort = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_KEY },
+        body: JSON.stringify(anfrage),
+      }
+    );
+    if (!antwort.ok) {
+      const details = await antwort.text();
+      return json({ fehler: `Stimme nicht verfügbar (${antwort.status})`, details: details.slice(0, 300) }, 502);
+    }
+    const daten = await antwort.json();
+    const teil = (daten?.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);
+    if (!teil) return json({ fehler: "kein Audio erhalten" }, 502);
+
+    const mime = String(teil.inlineData.mimeType || "");
+    const rate = Number((mime.match(/rate=(\d+)/) || [])[1] || 24000);
+    const binaer = atob(teil.inlineData.data);
+    let bytes = new Uint8Array(binaer.length);
+    for (let i = 0; i < binaer.length; i++) bytes[i] = binaer.charCodeAt(i);
+    // Falls eine WAV-Datei kommt: Kopf (44 Byte) entfernen, Lotse spielt rohes PCM ab
+    if (bytes.length > 44 && binaer.startsWith("RIFF")) bytes = bytes.slice(44);
+
+    return new Response(bytes, {
+      headers: { "Content-Type": "application/octet-stream", "X-Rate": String(rate) },
+    });
+  } catch (e) {
+    return json({ fehler: "Stimme nicht erreichbar" }, 502);
+  }
+}
 
 function json(daten, status = 200) {
   return new Response(JSON.stringify(daten), {

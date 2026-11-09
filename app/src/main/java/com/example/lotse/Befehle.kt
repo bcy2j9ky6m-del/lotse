@@ -22,6 +22,8 @@ sealed class Befehl {
     data class Vergessen(val was: String) : Befehl()
     object AllesVergessen : Befehl()
     object StimmeWechseln : Befehl()
+    object KiStimmeAn : Befehl()
+    object KiStimmeAus : Befehl()
     data class Tempo(val schritt: Float?) : Befehl() // null = normal
     data class SmsSchreiben(val rest: String) : Befehl()
     data class Zurueckschreiben(val text: String) : Befehl()
@@ -67,6 +69,12 @@ object Befehle {
         val t = einfach(satz)
 
         // Stimme und Tempo
+        if (t.contains("handystimme") || t.contains("handy stimme") || t.contains("alte stimme") ||
+            (t.contains("stimme") && (t.contains("ki") || t.contains("natürlich")) && t.contains("aus"))
+        ) return Befehl.KiStimmeAus
+        if (t.contains("natürliche stimme") || t.contains("ki stimme") || t.contains("ki-stimme") || t.contains("neue stimme")) {
+            return Befehl.KiStimmeAn
+        }
         if (t.contains("stimme") && (t.contains("andere") || t.contains("wechsel") || t.contains("ändern") || t.contains("nächste"))) {
             return Befehl.StimmeWechseln
         }

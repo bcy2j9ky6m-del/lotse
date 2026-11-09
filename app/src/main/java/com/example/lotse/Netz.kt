@@ -112,6 +112,30 @@ class Netz(private val context: Context) {
         }
     }
 
+    // KI-Stimme: Text an den Server, zurück kommt Audio (PCM 16 Bit mono) und die Abtastrate
+    fun sprachAudio(text: String, stimme: String): Pair<ByteArray, Int> {
+        val verbindung = URL(BuildConfig.LOTSE_SERVER.trimEnd('/') + "/sprich").openConnection() as HttpURLConnection
+        if (verbindung is HttpsURLConnection) verbindung.sslSocketFactory = sslFabrik
+        try {
+            verbindung.requestMethod = "POST"
+            verbindung.connectTimeout = 8_000
+            verbindung.readTimeout = 20_000
+            verbindung.doOutput = true
+            verbindung.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            verbindung.setRequestProperty("X-Lotse-Token", BuildConfig.LOTSE_TOKEN)
+            val inhalt = JSONObject().put("text", text).put("stimme", stimme).toString()
+            verbindung.outputStream.use { it.write(inhalt.toByteArray(Charsets.UTF_8)) }
+            val code = verbindung.responseCode
+            if (code !in 200..299) throw IOException("Stimme: Antwort $code")
+            val rate = verbindung.getHeaderField("X-Rate")?.toIntOrNull() ?: 24000
+            val daten = verbindung.inputStream.use { it.readBytes() }
+            if (daten.size < 1000) throw IOException("Stimme: zu wenig Audio")
+            return daten to rate
+        } finally {
+            verbindung.disconnect()
+        }
+    }
+
     // Schickt den Satz an den Server und liefert die vorlesbare Antwort.
     // Wirft eine Exception, wenn keine Verbindung möglich ist.
     fun frage(satz: String, jetzt: String, verlauf: List<Wechsel> = emptyList(), fakten: List<String> = emptyList()): String {
