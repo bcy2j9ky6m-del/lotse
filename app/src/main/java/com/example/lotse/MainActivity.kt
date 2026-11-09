@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val ergebnis = tts.setLanguage(Locale.GERMANY)
             stimmeBereit = ergebnis != TextToSpeech.LANG_MISSING_DATA &&
                 ergebnis != TextToSpeech.LANG_NOT_SUPPORTED
-            tts.setSpeechRate(0.85f)
+            Stimme.einstellen(this, tts) // beste bzw. gewählte Stimme und Tempo
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) { runOnUiThread { nachDemSprechen(utteranceId) } }
@@ -403,6 +403,30 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             is Befehl.Vergessen -> {
                 val anzahl = Gedaechtnis.vergiss(this, befehl.was)
                 antworten(if (anzahl > 0) "Gut, das habe ich vergessen." else "Dazu hatte ich mir nichts gemerkt.")
+                return
+            }
+            Befehl.StimmeWechseln -> {
+                val tts = stimme
+                val (nummer, anzahl) = if (tts != null) Stimme.naechste(this, tts) else (0 to 0)
+                antworten(
+                    when {
+                        anzahl == 0 -> "Auf diesem Handy finde ich keine weiteren deutschen Stimmen."
+                        anzahl == 1 -> "Auf diesem Handy gibt es nur diese eine deutsche Stimme."
+                        else -> "So klinge ich jetzt. Das ist Stimme $nummer von $anzahl. Sag nochmal: Andere Stimme, um weiterzuschalten."
+                    }
+                )
+                return
+            }
+            is Befehl.Tempo -> {
+                val tts = stimme
+                if (tts != null) Stimme.tempoAendern(this, tts, befehl.schritt)
+                antworten(
+                    when {
+                        befehl.schritt == null -> "Gut, ich spreche wieder normal schnell."
+                        befehl.schritt < 0 -> "Gut, ich spreche jetzt etwas langsamer."
+                        else -> "Gut, ich spreche jetzt etwas schneller."
+                    }
+                )
                 return
             }
             Befehl.AllesVergessen -> {

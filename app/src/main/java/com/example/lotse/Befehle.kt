@@ -21,6 +21,8 @@ sealed class Befehl {
     object WasWeisstDu : Befehl()
     data class Vergessen(val was: String) : Befehl()
     object AllesVergessen : Befehl()
+    object StimmeWechseln : Befehl()
+    data class Tempo(val schritt: Float?) : Befehl() // null = normal
     data class SmsSchreiben(val rest: String) : Befehl()
     data class Zurueckschreiben(val text: String) : Befehl()
     object Keiner : Befehl()
@@ -63,6 +65,16 @@ object Befehle {
 
     fun erkenne(satz: String): Befehl {
         val t = einfach(satz)
+
+        // Stimme und Tempo
+        if (t.contains("stimme") && (t.contains("andere") || t.contains("wechsel") || t.contains("ändern") || t.contains("nächste"))) {
+            return Befehl.StimmeWechseln
+        }
+        if (t.contains("sprich") || t.contains("sprech") || t.contains("rede")) {
+            if (t.contains("langsamer")) return Befehl.Tempo(-0.1f)
+            if (t.contains("schneller")) return Befehl.Tempo(0.1f)
+            if (t.contains("normal")) return Befehl.Tempo(null)
+        }
 
         // Gedächtnis – mit dem Originalsatz, damit Groß-/Kleinschreibung erhalten bleibt
         val original = satz.trim()
