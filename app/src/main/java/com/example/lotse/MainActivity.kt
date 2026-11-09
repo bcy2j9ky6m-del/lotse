@@ -387,6 +387,29 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             Befehl.Update -> { updateStarten(); return }
             Befehl.NachrichtenLesen -> { nachrichtenVorlesen(); return }
             Befehl.TelefonEinrichten -> { telefonEinrichten(); return }
+            is Befehl.Merken -> {
+                val gemerkt = Gedaechtnis.merke(this, befehl.fakt)
+                antworten("Gut, das merke ich mir: $gemerkt.")
+                return
+            }
+            Befehl.WasWeisstDu -> {
+                val fakten = Gedaechtnis.fakten(this)
+                antworten(
+                    if (fakten.isEmpty()) "Ich habe mir noch nichts gemerkt. Sag zum Beispiel: Merk dir, dass Anna meine Enkelin ist."
+                    else "Ich habe mir gemerkt: " + fakten.joinToString(". ") + "."
+                )
+                return
+            }
+            is Befehl.Vergessen -> {
+                val anzahl = Gedaechtnis.vergiss(this, befehl.was)
+                antworten(if (anzahl > 0) "Gut, das habe ich vergessen." else "Dazu hatte ich mir nichts gemerkt.")
+                return
+            }
+            Befehl.AllesVergessen -> {
+                Gedaechtnis.vergissAlles(this)
+                antworten("Gut, ich habe alles vergessen, was ich mir gemerkt hatte.")
+                return
+            }
             is Befehl.SmsSchreiben -> { smsVorbereiten(befehl.rest); return }
             is Befehl.Zurueckschreiben -> { zurueckschreiben(befehl.text); return }
             Befehl.Testtermin -> {
@@ -419,7 +442,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val jetzt = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm 'Uhr'", Locale.GERMANY).format(Date())
         Thread {
             val antwort = try {
-                netz.frage(satz, jetzt)
+                netz.frage(satz, jetzt, Gedaechtnis.verlauf(), Gedaechtnis.fakten(this))
+                    .also { Gedaechtnis.merkeWechsel(satz, it) }
             } catch (e: Exception) {
                 technik = "${e.javaClass.simpleName}: ${e.message ?: ""}".take(160)
                 "Ich habe gerade kein Internet. Anrufen, Nachrichten und Termine gehen trotzdem."

@@ -17,6 +17,10 @@ sealed class Befehl {
     object Testtermin : Befehl()
     object NachrichtenLesen : Befehl()
     object TelefonEinrichten : Befehl()
+    data class Merken(val fakt: String) : Befehl()
+    object WasWeisstDu : Befehl()
+    data class Vergessen(val was: String) : Befehl()
+    object AllesVergessen : Befehl()
     data class SmsSchreiben(val rest: String) : Befehl()
     data class Zurueckschreiben(val text: String) : Befehl()
     object Keiner : Befehl()
@@ -54,8 +58,23 @@ object Befehle {
         Regex("""^(.+?)\s+anrufen\b""")
     )
 
+    private val merkMuster = Regex("""^(?:bitte\s+)?(?:merk|merke)\s+dir\s*,?\s*(?:bitte\s+)?(?:dass\s+)?(.+)$""", RegexOption.IGNORE_CASE)
+    private val vergissMuster = Regex("""^(?:bitte\s+)?vergiss\s*,?\s*(?:bitte\s+)?(?:dass\s+)?(.*)$""", RegexOption.IGNORE_CASE)
+
     fun erkenne(satz: String): Befehl {
         val t = einfach(satz)
+
+        // Gedächtnis – mit dem Originalsatz, damit Groß-/Kleinschreibung erhalten bleibt
+        val original = satz.trim()
+        merkMuster.find(original)?.let { return Befehl.Merken(it.groupValues[1]) }
+        if (t.contains("was weißt du über mich") || t.contains("was weißt du von mir") ||
+            t.contains("was hast du dir gemerkt") || t.contains("was merkst du dir")
+        ) return Befehl.WasWeisstDu
+        vergissMuster.find(original)?.let {
+            val rest = it.groupValues[1].trim()
+            return if (rest.isBlank() || einfach(rest).split(" ").contains("alles")) Befehl.AllesVergessen
+            else Befehl.Vergessen(rest)
+        }
 
         if ((t.contains("wer hat") && t.contains("angerufen")) ||
             t.contains("verpasste anrufe") || t.contains("letzte anrufe") || t.contains("letzten anrufe")

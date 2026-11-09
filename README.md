@@ -22,6 +22,7 @@ Neue Versionen werden nach jeder Änderung automatisch gebaut (Reiter *Actions*,
 - Schritt 6: SMS vorlesen („Lies meine Nachrichten vor“), Ansage bei neuer SMS, schreiben („Schreib Anna …“), antworten („Antworte …“), Warnung bei unbekannten Nummern und Betrugsverdacht ✔
 - Schritt 7: Lotse als Telefon-App („Telefon einrichten“) – eigener Anrufbildschirm mit Ansage des Anrufers, ANNEHMEN, Ablehnen, Lautsprecher, AUFLEGEN, Warnung bei unbekannten Nummern ✔
 - Schritt 9: Kiosk-Modus (Geräteinhaber per adb), Lotse als Startbildschirm, keine Statusleiste, kein Sperrbildschirm; Pflege-Zugang: 7× auf den Wochentag tippen → PIN → Einstellungen / Kiosk ausschalten ✔
+- Gedächtnis: letzte Fragen/Antworten (30 Min.), „Merk dir, dass …“, „Was weißt du über mich?“, „Vergiss …“ – nur auf dem Handy gespeichert ✔
 - Selbst-Update per Sprachbefehl („Update“, „Aktualisiere dich“): sucht die neueste Version, lädt sie und öffnet die Installation ✔
 
 ## Hinweis

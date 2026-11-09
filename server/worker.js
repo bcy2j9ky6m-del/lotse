@@ -20,8 +20,11 @@ So antwortest du:
 - Wenn du etwas nicht sicher weißt, sag das ehrlich.
 
 Grenzen:
-- Anrufen, Nachrichten schicken und Termine eintragen kannst du noch nicht. Sag dann freundlich:
-  „Das kann ich bald. Im Moment kann ich nur Fragen beantworten.“
+- Anrufen, Nachrichten und Termine erledigt das Handy selbst, wenn sie es so sagt:
+  „Ruf Anna an“, „Schreib Anna, ich komme um drei“, „Was habe ich heute vor?“.
+  Wenn sie so etwas möchte, aber anders formuliert hat, erkläre ihr freundlich und kurz, wie sie es sagen kann.
+- Wenn sie möchte, dass du dir etwas dauerhaft merkst, sag ihr: „Sag einfach: Merk dir, dass …“.
+- Beziehe dich auf frühere Fragen in diesem Gespräch, wenn sie nachfragt (zum Beispiel „Und morgen?“).
 - Bei Fragen zu Gesundheit oder Medikamenten gibst du keine Ratschläge zur Dosis,
   sondern empfiehlst, die Pflegekräfte oder den Arzt zu fragen.
 - Wenn jemand nach Geld, PIN, Passwörtern oder Kontodaten fragt oder es nach Betrug klingt,
@@ -55,12 +58,33 @@ export default {
     const jetzt = String(eingabe.jetzt || "").slice(0, 100);
     if (!satz) return json({ antwort: "Ich habe nichts gehört." });
 
+    // Gedächtnis: gemerkte Dinge (dauerhaft, vom Handy) und die letzten Fragen und Antworten
+    const fakten = (Array.isArray(eingabe.fakten) ? eingabe.fakten : [])
+      .slice(0, 30).map((f) => String(f).slice(0, 200));
+    const verlauf = (Array.isArray(eingabe.verlauf) ? eingabe.verlauf : []).slice(-6);
+
+    let anweisung = `${ANWEISUNG}\n\nJetzt ist: ${jetzt}.`;
+    if (fakten.length > 0) {
+      anweisung += `\n\nDas hat sie dir gesagt, damit du es dir merkst (nutze es, wenn es passt):\n- ${fakten.join("\n- ")}`;
+    }
+
+    const contents = [];
+    for (const w of verlauf) {
+      const frage = String(w?.frage || "").slice(0, 500);
+      const antwort = String(w?.antwort || "").slice(0, 500);
+      if (frage && antwort) {
+        contents.push({ role: "user", parts: [{ text: frage }] });
+        contents.push({ role: "model", parts: [{ text: antwort }] });
+      }
+    }
+    contents.push({ role: "user", parts: [{ text: satz }] });
+
     const modell = env.MODELL || "gemini-flash-lite-latest";
     const anfrage = {
       systemInstruction: {
-        parts: [{ text: `${ANWEISUNG}\n\nJetzt ist: ${jetzt}.` }],
+        parts: [{ text: anweisung }],
       },
-      contents: [{ role: "user", parts: [{ text: satz }] }],
+      contents,
       generationConfig: { maxOutputTokens: 200, temperature: 0.4 },
     };
 

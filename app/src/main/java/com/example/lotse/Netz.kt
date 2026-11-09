@@ -114,7 +114,7 @@ class Netz(private val context: Context) {
 
     // Schickt den Satz an den Server und liefert die vorlesbare Antwort.
     // Wirft eine Exception, wenn keine Verbindung möglich ist.
-    fun frage(satz: String, jetzt: String): String {
+    fun frage(satz: String, jetzt: String, verlauf: List<Wechsel> = emptyList(), fakten: List<String> = emptyList()): String {
         val verbindung = URL(BuildConfig.LOTSE_SERVER.trimEnd('/') + "/frage").openConnection() as HttpURLConnection
         if (verbindung is HttpsURLConnection) {
             verbindung.sslSocketFactory = sslFabrik
@@ -127,7 +127,14 @@ class Netz(private val context: Context) {
             verbindung.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             verbindung.setRequestProperty("X-Lotse-Token", BuildConfig.LOTSE_TOKEN)
 
-            val inhalt = JSONObject().put("text", satz).put("jetzt", jetzt).toString()
+            val bisher = org.json.JSONArray()
+            verlauf.forEach { bisher.put(JSONObject().put("frage", it.frage).put("antwort", it.antwort)) }
+            val inhalt = JSONObject()
+                .put("text", satz)
+                .put("jetzt", jetzt)
+                .put("verlauf", bisher)
+                .put("fakten", org.json.JSONArray(fakten))
+                .toString()
             verbindung.outputStream.use { it.write(inhalt.toByteArray(Charsets.UTF_8)) }
 
             val code = verbindung.responseCode
