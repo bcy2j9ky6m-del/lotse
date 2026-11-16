@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Fehlerprotokoll.einrichten(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         stimme = TextToSpeech(this, this)
 
@@ -225,7 +226,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val (pcm, rate) = netz.sprachAudio(text, stimmeName)
                     if (nummer != sprechNummer) return@Thread
                     KiStimme.abspielen(pcm, rate, tempo)
-                } catch (_: Exception) {
+                } catch (_: Throwable) {
                     false
                 }
                 runOnUiThread {
@@ -272,7 +273,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val version = packageManager.getPackageInfo(packageName, 0).versionName
         val telefon = if (istTelefonApp()) "ja" else "NEIN"
         val kiosk = if (Kiosk.istGeraeteinhaber(this)) "ja" else "NEIN"
-        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon · Kiosk: $kiosk"
+        diagnose = "Version $version · Zuhören: $hoeren · Stimme: $sprechen · Server: $gehirn · Telefon: $telefon · Kiosk: $kiosk" +
+            (Fehlerprotokoll.letzter(this)?.let { "\nLetzter Absturz: $it" } ?: "")
     }
 
     // ---------- Berechtigungen ----------
@@ -350,7 +352,23 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         }
-        erkenner?.startListening(auftrag)
+        try {
+            erkenner?.startListening(auftrag)
+        } catch (_: Exception) {
+            if (!fuerRueckfrage) antworten("Das Zuhören hat nicht geklappt. Drück nochmal die Taste.")
+            return
+        }
+        // Sicherheitsnetz: Falls die Spracherkennung hängt, nach 25 Sekunden zurücksetzen
+        handler.removeCallbacks(hoerWaechter)
+        if (!fuerRueckfrage) handler.postDelayed(hoerWaechter, 25_000)
+    }
+
+    private val hoerWaechter = Runnable {
+        if (zustand == Zustand.HOEREN) {
+            try { erkenner?.destroy() } catch (_: Exception) {}
+            erkenner = null
+            antworten("Ich habe nichts gehört. Drück einfach nochmal die Taste.")
+        }
     }
 
     private val zuhoerer = object : RecognitionListener {
@@ -962,6 +980,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         handler.removeCallbacks(zurueckZurRuhe)
         handler.removeCallbacks(regelmaessig)
+        handler.removeCallbacks(hoerWaechter)
+        stoppeSprechen()
         erkenner?.destroy()
         stimme?.shutdown()
         super.onDestroy()

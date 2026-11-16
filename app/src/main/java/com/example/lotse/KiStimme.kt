@@ -14,8 +14,8 @@ object KiStimme {
 
     private fun speicher(context: Context) = context.getSharedPreferences("lotse", Context.MODE_PRIVATE)
 
-    fun aktiv(context: Context): Boolean = speicher(context).getBoolean("kistimme", true)
-    fun setzeAktiv(context: Context, an: Boolean) { speicher(context).edit().putBoolean("kistimme", an).apply() }
+    fun aktiv(context: Context): Boolean = speicher(context).getBoolean("kistimme2", false)
+    fun setzeAktiv(context: Context, an: Boolean) { speicher(context).edit().putBoolean("kistimme2", an).apply() }
 
     fun name(context: Context): String = speicher(context).getString("kistimmeName", stimmen.first()) ?: stimmen.first()
 
@@ -51,15 +51,17 @@ object KiStimme {
                 if (n <= 0) return false
                 pos += n
             }
-            // Warten, bis alles abgespielt ist
+            // Rest abspielen lassen und höchstens so lange warten, wie der Text dauert (+ Puffer)
+            track.stop()
             val frames = pcm.size / 2
-            while (spur === track && track.playbackHeadPosition < frames) Thread.sleep(50)
+            val ende = System.currentTimeMillis() + frames * 1000L / wiedergabeRate + 1500
+            while (spur === track && track.playbackHeadPosition < frames && System.currentTimeMillis() < ende) Thread.sleep(50)
             return spur === track
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             return false
         } finally {
-            try { track.stop() } catch (_: Exception) {}
-            track.release()
+            try { track.stop() } catch (_: Throwable) {}
+            try { track.release() } catch (_: Throwable) {}
             if (spur === track) spur = null
         }
     }
